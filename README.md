@@ -82,6 +82,18 @@ src/orches/replay.py    request-level composition on one event timeline
 correspondence. Its synthetic replay tests validate control flow but do not
 replace real workload collection or hardware calibration.
 
+M4 comparison code uses one common result boundary:
+
+```text
+src/orches/baselines/  paper configurations, fairness checks, native adapters
+src/orches/metrics/    activity energy, area denominator, and utilization
+```
+
+`docs/baseline-contract.md` documents the required fairness fingerprint and
+the exact AttAcc/Duplex unit conversions. Native output is never normalized
+until its trace, model, precision, capacity, and bandwidth contract matches the
+GPU reference.
+
 `DEVELOPMENT.md` is the milestone ledger. `REPRODUCTION_PLAN.md` describes the
 full implementation and evaluation plan, and `docs/paper-to-code.md` maps paper
 claims to implementation and tests.

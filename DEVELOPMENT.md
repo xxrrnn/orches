@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2A complete) | 64 tests; native PIM smoke; real traces/GPU calibration pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | Not started | - |
+| M4 | Baselines, energy, area, utilization | In progress (M4A complete) | 121 tests; contracts/parsers/accounting complete; launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -657,6 +657,129 @@ replayer is single-use so state from one request cannot leak into another.
 6. Run the full evaluation matrix and compare Table 4/5, Fig. 11-13, and all
    paper aggregates with deviation attribution.
 
+## M4A: Baseline Contracts and Metric Accounting
+
+### Checkpoint Scope
+
+M4A defines the comparison boundary before implementing native experiment
+launchers. It freezes the paper's baseline/ablation switch matrix, enforces a
+common workload and hardware fingerprint, parses frozen AttAcc and Duplex
+output schemas into SI units, adapts full ORCHES replay, and implements shared
+energy/area/utilization accounting. It does not yet claim executable parity for
+GPU, ORCHES-A/B/C, or native end-to-end AttAcc/Duplex runs.
+
+### Upstream Audit
+
+The AttAcc source at `c60005143a6b492d7ef83231723386478b59a506`
+returns layer-group time in milliseconds and energy in nanojoules. Its energy
+model is activity based: memory/communication bytes and MAC operations are
+multiplied by pJ coefficients. The adapter follows the CSV schema written by
+upstream `main.py`; it does not import mutable third-party Python modules into
+the ORCHES package.
+
+The Duplex LLMSimulator source at
+`419252761fbdb95b789778a02256d458a5537ec7` exports mixed iteration and request
+records through `Cluster::exportToCSV`. Timing fields are nanoseconds and energy
+fields are nanojoules. `iter_info=1` rows carry device activity; `type=e2e` rows
+carry request completion. This distinction is preserved by the adapter.
+
+### Paper Configuration Matrix
+
+`baselines/definitions.py` makes each paper configuration explicit:
+
+| Result set | Required systems |
+|---|---|
+| Fig. 11 | GPU, AttAcc, Duplex, full ORCHES |
+| Fig. 12 | GPU, AttAcc, ORCHES-A, ORCHES-B, ORCHES-C |
+| Table 6 | GPU, T1 only, T2 only, full ORCHES |
+
+ORCHES-A places all computation on PIM. ORCHES-B enables adaptive linear
+assignment. ORCHES-C adds T1B dynamic compensation. T2 is disabled in all
+three, exactly as Sec. 5.3 states. T3 remains enabled because Sec. 5.3 does not
+state that memory structuring is removed; this interpretation is
+`A-BASE-001` and requires sensitivity validation.
+
+### Fairness and Failure Contract
+
+Every result contains one `FairnessContract` whose deterministic SHA-256 covers
+the trace, ordered request IDs, all model/tokenizer identities and revisions,
+weight/activation precision, GPU count, SoC bandwidth, PIM capacity, and
+hardware-contract hash. `compare_baselines` rejects mixed fingerprints,
+duplicate or missing required systems, and normalization without a successful
+GPU reference.
+
+Run status is one of success, OOM, failed, or missing. Non-success rows require
+an error and cannot carry metrics. They remain in the normalized comparison
+with null speedup/energy efficiency; no pre-aggregation filter can silently
+remove them.
+
+### Native Result Adapters
+
+`parse_attacc_csv` converts `g_time (ms)` to seconds and all generation-energy
+nJ columns to joules. It converts native GiB capacity to bytes and emits OOM
+when `required_cap` exceeds it. `parse_duplex_csv` converts all ns/nJ columns,
+uses mean E2E request latency, sums iteration activity energy, and propagates
+the native OOM flag. Both reject missing, negative, non-numeric, `NaN`, and
+infinite values.
+
+The adapters translate results only. M4B launchers must still generate native
+configs from the fairness contract and bind command/config/binary/output hashes
+to each result.
+
+### Energy, Area, and Utilization
+
+`metrics/energy.py` keeps pJ/activity coefficients distinct from measured
+energy. The inherited AttAcc bank-level constants are:
+
+| Activity | Unit energy | Status |
+|---|---:|---|
+| GPU/PIM MAC | 0.32 pJ/MAC | `INHERITED` |
+| GPU off-memory byte | 28.72 pJ/byte | `INHERITED` |
+| PIM bank-level memory byte | 4.4 pJ/byte | `INHERITED` |
+| Host communication byte | 10.4 pJ/byte | `INHERITED` |
+| Controller SRAM byte | 0.0034 pJ/byte | `INHERITED` proxy |
+
+Generation activity is reconstructed from the selected Eq. (1)-(7) alphas,
+including discarded all-PIM speculation. Replay aggregation adds address-cache
+SRAM/DRAM accesses, shared-buffer writeback, GPU synchronization, and
+compaction RD/WR bytes. PRM verifier activity is a required explicit input; it
+is never inferred from elapsed time.
+
+`AreaReport` requires component mm2 and a named positive baseline denominator,
+so a 12% overhead cannot be reported without defining "12% of what".
+`UtilizationReport` uses busy/makespan under one common timeline and rejects
+busy time greater than wall time.
+
+### Verification Evidence
+
+| Check | Result |
+|---|---|
+| Full Python suite | 121 passed |
+| Syntax compilation and diff whitespace | Passed |
+| Paper baseline sets | Fig. 11/12 and Table 6 definitions tested |
+| Fairness fingerprint | Stable for equal inputs; changes with SoC bandwidth |
+| Failure visibility | OOM remains a comparison row with null normalized value |
+| AttAcc adapter | ms/nJ/GiB conversion, components, OOM, non-finite rejection |
+| Duplex adapter | E2E/iteration separation and ns/nJ conversion |
+| Energy accounting | AttAcc constants, pJ-to-J conversion, exact zero activity |
+| Scheduler activity | GPU+PIM MACs conserve the Eq. (1)-(7) workload |
+| Area accounting | Explicit components reproduce a constructed 12% overhead |
+| Utilization | Cross-resource overlap uses one makespan without double counting |
+| ORCHES adapter | Full replay produces common latency/energy/memory/utilization |
+
+### Remaining M4 Work
+
+1. Implement launch manifests and executable native AttAcc/Duplex commands from
+   one fairness contract.
+2. Implement analytical/native GPU and ORCHES-A/B/C/T1-only/T2-only request
+   runners on the same TTC trace.
+3. Bind real verifier operator activity, not development-only placeholder
+   counters, to ORCHES energy.
+4. Calibrate cache/buffer unit energy and component area; resolve
+   `A-ENERGY-001` and `A-AREA-001`.
+5. Produce one smoke comparison containing every required status and raw result
+   hash before starting the paper evaluation matrix.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -665,3 +788,4 @@ replayer is single-use so state from one request cannot leak into another.
 | 2026-07-27 | M1 | Added strict provenance-aware hardware contracts, corrected the PIM channel mapping, verified AGX Orin specifications, added bootstrap audit, and passed 14 tests. |
 | 2026-07-27 | M2A | Added deterministic TTC traces, six model profiles, operator/timing primitives, a generic event timeline, reversible PIM mapping, and native AttAcc smoke execution; 64 tests pass, while real traces and GPU calibration remain pending. |
 | 2026-07-27 | M3 | Implemented T1A/T1B scheduling, history-aligned prediction, speculative rollback, pipelined verification, fragmentation-aware memory structuring, and request-level replay; 105 tests pass, while calibrated evaluation remains pending. |
+| 2026-07-27 | M4A | Added paper baseline definitions, fairness fingerprints, strict AttAcc/Duplex/ORCHES adapters, and unit-explicit energy/area/utilization accounting; 121 tests pass, while executable launchers and calibration remain pending. |

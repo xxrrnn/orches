@@ -9,6 +9,8 @@ from orches.memory import (
     PimMemoryAllocator,
     SharedKvBuffer,
 )
+from orches.baselines import FairnessContract, RunStatus, adapt_orches_replay
+from orches.metrics import EnergyActivity, attacc_bank_level_energy_rates
 from orches.models import PaperGpuRates, PaperPimRates
 from orches.predictor import ScoreAggregation, VerificationPipeline
 from orches.replay import OrchesRequestReplayer, ReplayConfig
@@ -96,6 +98,9 @@ def test_correct_predictions_preserve_pim_work_and_resume_t1() -> None:
         assert current.speculation is not None
         assert current.speculation.prediction_correct
         assert current.speculation.t1_disabled_during_speculation
+        assert current.speculative_event is not None
+        assert current.speculative_plan is not None
+        assert current.speculative_work_fraction > 0
         assert following.generation.prior_speculative_event is not None
         assert following.generation.speculative_work_fraction > 0
         assert following.generation.t1_work_fraction < 1
@@ -116,6 +121,8 @@ def test_misprediction_discards_kv_once_and_restarts_selected_branch() -> None:
     assert first.prediction.candidate_id != trace.steps[0].selected_candidate_id
     assert first.speculation is not None
     assert not first.speculation.prediction_correct
+    assert first.speculative_event is not None
+    assert first.speculative_work_fraction > 0
     assert first.speculation.discarded_kv_bytes > 0
     assert first.rollback_event is not None
     assert first.rollback_event.start_s >= first.large_prm_event.end_s
@@ -160,5 +167,52 @@ def test_request_replay_exposes_all_step_decisions_and_resources() -> None:
     assert result.timeline.busy_time_s(Resource.GPU) > 0
     assert result.timeline.busy_time_s(Resource.PIM) > 0
     assert result.timeline.busy_time_s(Resource.CONTROLLER) > 0
+    assert result.address_cache.misses == trace.candidate_count
+    assert result.shared_kv_buffer.controller_to_bank_bytes > 0
     assert 0 <= result.timeline.utilization(Resource.GPU) <= 1
     assert 0 <= result.timeline.utilization(Resource.PIM) <= 1
+
+
+def test_full_replay_adapts_to_common_baseline_metrics() -> None:
+    replayer, _ = build_replay()
+    trace = synthetic_trace(0)
+    replay = replayer.run(trace)
+    fairness = FairnessContract(
+        trace_sha256="a" * 64,
+        request_ids=(trace.request_id,),
+        policy_model=trace.provenance.policy_model.name,
+        policy_revision=trace.provenance.policy_model.revision,
+        small_prm_model=trace.provenance.small_prm_model.name,
+        small_prm_revision=trace.provenance.small_prm_model.revision,
+        large_prm_model=trace.provenance.large_prm_model.name,
+        large_prm_revision=trace.provenance.large_prm_model.revision,
+        tokenizer=trace.provenance.tokenizer.name,
+        tokenizer_revision=trace.provenance.tokenizer.revision,
+        weight_bytes_per_element=2,
+        activation_bytes_per_element=2,
+        gpu_count=1,
+        soc_bandwidth_bytes_per_s=204.8e9,
+        pim_capacity_bytes=32 * 1024**3,
+        hardware_contract_sha256="b" * 64,
+    )
+
+    result = adapt_orches_replay(
+        replay,
+        contract=fairness,
+        source_revision="d5bd4aa",
+        energy_rates=attacc_bank_level_energy_rates(),
+        bytes_per_element=2,
+        cache_entry_bytes=24,
+        verifier_activity=EnergyActivity(
+            gpu_macs=1000,
+            gpu_memory_bytes=2000,
+        ),
+    )
+
+    assert result.status is RunStatus.SUCCESS
+    assert result.metrics is not None
+    assert result.metrics.latency_s == replay.timeline.makespan_s
+    assert result.metrics.energy_j is not None
+    assert result.metrics.energy_j > 0
+    assert result.metrics.utilization["gpu"] > 0
+    assert result.components["activity.compaction_read_bytes"] >= 0

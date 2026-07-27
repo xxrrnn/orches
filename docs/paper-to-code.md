@@ -22,6 +22,11 @@ when both implementation and verification evidence exist.
 | Sec. 4.3.2, Fig. 9(d) | T2B token-triggered pre-verification in GPU idle windows | `predictor/pipeline.py`; `sim/event.py` | zero/partial/full overlap, threshold, shared timeline IDs, serial overhead | M3 complete; threshold requires calibration |
 | Sec. 3.3, Fig. 10, Sec. 4.4 | T3 address cache, holes, compaction, shared-KV buffer | `memory/allocator.py`, `cache.py`, `policy.py`, `trace.py`, `buffer.py` | first-fit/prune, stale generation, intervals 3/4/5, RD/WR trace, buffer traffic | M3 complete; hardware sizes/rates assumed |
 | Sec. 4.2-4.4 | Request-level composition of T1/T2/T3 | `replay.py` | correct and incorrect speculation, T3 ablation, resource timeline | M3 functional replay complete |
+| Sec. 5.1, Fig. 11-12, Table 6 | GPU, AttAcc, Duplex, ORCHES and ablation definitions | `baselines/definitions.py` | exact required sets and technique-switch tests | M4A contract complete; launchers pending |
+| Sec. 5.1-5.2 | Fair normalized latency/energy comparison | `baselines/results.py` | contract fingerprint, mismatch rejection, failure retention | M4A complete |
+| Prior work [25, 40] | Native AttAcc ms/nJ and Duplex ns/nJ output adaptation | `baselines/adapters.py` | schema/unit/OOM/non-finite fixture tests | M4A parser complete; native execution pending |
+| Table 1, Sec. 5.1 | Activity-counter energy using inherited unit values | `metrics/energy.py`, `activity.py` | exact constants, pJ-to-J, MAC conservation | M4A complete; controller calibration pending |
+| Sec. 5.5-5.6 | Area overhead and GPU/PIM utilization | `metrics/area.py`, `utilization.py` | explicit denominator, 12% constructed case, overlap accounting | M4A contract complete; measurements pending |
 
 The complete phase sequence and evaluation matrix remain in
 `REPRODUCTION_PLAN.md`.

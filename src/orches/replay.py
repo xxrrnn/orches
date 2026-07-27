@@ -8,6 +8,7 @@ from math import floor, isfinite
 from .errors import ConfigurationError
 from .memory import (
     AddressCache,
+    AddressCacheStats,
     AddressLookup,
     CompactionController,
     CompactionDecision,
@@ -16,6 +17,7 @@ from .memory import (
     MemoryStats,
     PimMemoryAllocator,
     SharedKvBuffer,
+    SharedKvBufferStats,
     build_compaction_trace,
 )
 from .predictor import (
@@ -137,6 +139,9 @@ class StepReplayResult:
     prediction: PredictionDecision
     large_prm_event: Event
     speculation: SpeculationResolution | None
+    speculative_event: Event | None
+    speculative_plan: GenerationPlan | None
+    speculative_work_fraction: float
     rollback_event: Event | None
     memory_before_prune: MemoryStats
     memory_after_step: MemoryStats
@@ -152,6 +157,8 @@ class OrchesReplayResult:
     steps: tuple[StepReplayResult, ...]
     timeline: EventTimeline
     final_memory: MemoryStats
+    address_cache: AddressCacheStats
+    shared_kv_buffer: SharedKvBufferStats
     prediction_correct: int
     prediction_total: int
     compaction_read_bytes: int
@@ -336,6 +343,9 @@ class OrchesRequestReplayer:
                     prediction=prediction,
                     large_prm_event=large_prm_event,
                     speculation=speculation,
+                    speculative_event=speculative_event,
+                    speculative_plan=next_plan,
+                    speculative_work_fraction=speculative_fraction,
                     rollback_event=rollback_event,
                     memory_before_prune=memory_before_prune,
                     memory_after_step=memory_after_step,
@@ -375,6 +385,8 @@ class OrchesRequestReplayer:
             steps=tuple(step_results),
             timeline=timeline,
             final_memory=self.allocator.stats(),
+            address_cache=self.address_cache.stats(),
+            shared_kv_buffer=self.shared_kv_buffer.stats(),
             prediction_correct=correct_predictions,
             prediction_total=prediction_total,
             compaction_read_bytes=sum(
