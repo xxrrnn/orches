@@ -58,8 +58,12 @@ and cannot be presented as successful traces.
 The compute-optimal-TTS worker integration consumes cumulative vLLM snapshots.
 It verifies append-only IDs, waits for all requested output sequences, and
 records the terminal sampled token as not yet KV-materialized. The first
-external patch exposes these fields and the sampling seed. Candidate/legal-action
-and search-selection hooks remain required before a real trace can be emitted.
+external patch exposes these fields and the sampling seed. The second patch
+binds candidate IDs to accepted legal actions, carries them through
+`LanguageNode`, and records the actual global beam selection. A successful
+request is rebuilt through the strict Policy-v1 validator before write; failed
+and OOM streams remain raw-only evidence. The integration is executable for
+the paper's `num_sequence=1` mode, but no GPU trace has been collected yet.
 
 Both versions exclude prompt text, generated text, reference answers, and
 correctness. Correctness belongs in a separate evaluation record keyed by

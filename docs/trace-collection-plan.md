@@ -345,9 +345,11 @@ UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-trace artifacts/traces/
 ```
 
 `validate-policy-trace`, strict manifest binding, raw policy events,
-`validate-policy-events`, and the first exact-token worker patch are implemented
-through M4B.4A. Host probing, the search-tree selection hook, and both complete
-collection commands remain design targets.
+`validate-policy-events`, exact-token worker capture, accepted-action IDs, and
+the complete search-tree selection hook are implemented through M4B.4B. The
+patched launchers require a UV-provided Python executable and do not activate
+Conda. Host probing, local/server UV trace locks, event-set conversion into one
+trace/manifest, and both complete collection commands remain design targets.
 
 ## Artifact Contract
 
@@ -375,11 +377,15 @@ a documented determinism result.
    exact selection-verifier work, and ordered physical pruning.
 3. [Partial] Add the collection manifest contract and validation; host probing
    remains.
-4. [Partial] Implement raw text events, vLLM token capture, and event-to-trace
-   conversion; accepted-action and complete-tree selection hooks remain.
-5. Implement layer-10/final PRM scoring with architecture-specific tests.
-6. Run the 5070 Ti smallest-pair pilot.
-7. Pin executable LLaVA-CoT and implement width-2/4 tournament export.
-8. Run server 10-request, 50-request, then full matrices.
-9. Replay the frozen traces with `paper_method`; run `orin_calibrated` only when
+4. [Complete for generation-only `num_sequence=1`] Implement raw text events,
+   vLLM token capture, accepted-action IDs, complete-tree selection, terminal
+   failure/OOM retention, and per-request event-to-trace validation.
+5. Add host probing, freeze separate 5070/server UV locks, and convert a raw
+   event set into one policy trace, manifest, and validation report.
+6. Run and repeat-hash the 5070 Ti smallest-pair generation-only pilot.
+7. Implement layer-10/final PRM scoring with architecture-specific tests and
+   enrich the validated pilot into complete TTC v2.
+8. Pin executable LLaVA-CoT and implement width-2/4 tournament export.
+9. Run server 10-request, 50-request, then full matrices.
+10. Replay the frozen traces with `paper_method`; run `orin_calibrated` only when
    target hardware is available.

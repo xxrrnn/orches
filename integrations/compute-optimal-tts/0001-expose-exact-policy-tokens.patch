@@ -9,7 +9,7 @@ index b608657..673a4f8 100644
 +        seed=args.seed,
      )
      cfg_dict_record["gen_config"] = gen_config.__dict__
- 
+
 @@ -275,6 +276,7 @@ if __name__ == "__main__":
                  top_k=-1,
                  top_p=top_p,
@@ -27,8 +27,8 @@ index 23b5f12..6a2d738 100644
      include_stop_str_in_output: bool = False
      first_generation: bool = False
 +    seed: int = 0
- 
- 
+
+
  class LanguageModelCallingFunction:
 @@ -64,6 +65,7 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
                  temperature=config.temperature,
@@ -51,12 +51,12 @@ index 888a136..e170b27 100644
 --- a/src/reason/inference/text_generation.py
 +++ b/src/reason/inference/text_generation.py
 @@ -4,7 +4,7 @@ This file is largely borrowed from OpenR (https://github.com/openreasoner/openr)
- 
+
  import traceback
  from dataclasses import dataclass
 -from typing import List
 +from typing import List, Optional
- 
+
  import requests
  from transformers import AutoTokenizer
 @@ -18,6 +18,11 @@ class ConcatedLMGenResult:
@@ -68,7 +68,7 @@ index 888a136..e170b27 100644
 +    output_token_ids: Optional[List[List[int]]] = None
 +    token_ready_indices: Optional[List[List[int]]] = None
 +    materialized_output_tokens: Optional[List[int]] = None
- 
+
      # post init compute number of completion_tokens
      def __post_init__(self):
 @@ -51,6 +56,7 @@ def _generate_fastchat(
@@ -97,8 +97,8 @@ index 888a136..e170b27 100644
 +        token_ready_indices=results["token_ready_indices"],
 +        materialized_output_tokens=results["materialized_output_tokens"],
      )
- 
- 
+
+
 @@ -119,6 +131,7 @@ def _generate_sgl(
      temperature,
      top_p,
@@ -108,20 +108,20 @@ index 888a136..e170b27 100644
      stop_token_ids,
      stop_str,
 diff --git a/src/reason/llm_service/workers/vllm_worker.py b/src/reason/llm_service/workers/vllm_worker.py
-index e773ab8..af879f8 100644
+index e773ab8..235a0bb 100644
 --- a/src/reason/llm_service/workers/vllm_worker.py
 +++ b/src/reason/llm_service/workers/vllm_worker.py
 @@ -18,6 +18,10 @@ from vllm.sampling_params import SamplingParams
  from vllm.utils import random_uuid
  from transformers import AutoTokenizer
- 
+
 +from orches.collectors.compute_optimal_tts import (
 +    VllmOutputSnapshot,
 +    VllmSnapshotAccumulator,
 +)
  from reason.llm_service.workers.base_model_worker import BaseModelWorker
  from fastchat.utils import get_context_length, build_logger
- 
+
 @@ -78,6 +82,9 @@ class VLLMWorker(BaseModelWorker):
          use_beam_search = params.get("use_beam_search", False)
          best_of = params.get("best_of", None)
@@ -129,7 +129,7 @@ index e773ab8..af879f8 100644
 +        if "seed" not in params:
 +            raise ValueError("exact policy collection requires a sampling seed")
 +        seed = int(params["seed"])
- 
+
          # Handle stop_str
          stop = set()
 @@ -103,6 +110,7 @@ class VLLMWorker(BaseModelWorker):
@@ -145,7 +145,7 @@ index e773ab8..af879f8 100644
          )
          results_generator = engine.generate(context, sampling_params, request_id)
 +        evidence = VllmSnapshotAccumulator(expected_outputs=n)
- 
+
          async for request_output in results_generator:
 +            evidence.observe(
 +                tuple(request_output.prompt_token_ids),
@@ -166,83 +166,291 @@ index e773ab8..af879f8 100644
 +            if evidence.is_complete:
 +                ret.update(evidence.final_payload(request_id))
              yield (json.dumps(ret) + "\0").encode()
- 
+
      async def generate(self, params):
 diff --git a/src/scripts/run.sh b/src/scripts/run.sh
+index a3fc2cc..0a3980c 100644
 --- a/src/scripts/run.sh
 +++ b/src/scripts/run.sh
-@@ -114,7 +114,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ # Default arguments
+ LM=models--meta-llama--Llama-3.2-1B-Instruct
+@@ -114,7 +114,8 @@ fi
  POLICY_MODEL_PATH=${LM}
  VALUE_MODEL_PATH=${RM}
- 
+
 -export PYTHONPATH=$(pwd)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
  cd ${PYTHONPATH}
- 
+
  export CUDA_VISIBLE_DEVICES=0
+@@ -131,7 +132,7 @@ controller_addr=http://$HOST_ADDR:$CONTROLLER_PORT
+
+ echo "Running $method evaluation ..."
+
+-python reason/evaluation/evaluate.py \
++"${ORCHES_PYTHON_EXECUTABLE}" reason/evaluation/evaluate.py \
+     --LM $POLICY_MODEL_PATH \
+     --RM $VALUE_MODEL_PATH \
+     --task_name $task_name \
 diff --git a/src/scripts/serve_gpu1.sh b/src/scripts/serve_gpu1.sh
+index 1e0a4db..7064b51 100644
 --- a/src/scripts/serve_gpu1.sh
 +++ b/src/scripts/serve_gpu1.sh
-@@ -19,7 +19,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ POLICY_MODEL_PATH=$1
+ VALUE_MODEL_PATH=$2
+@@ -19,8 +19,9 @@ echo "${GPU_LIST[@]}"
  HOST_ADDR=$3
  CONTROLLER_PORT=$4
  WORKER_BASE_PORT=$5
 -export PYTHONPATH=$(pwd)
+-PYTHON_EXECUTABLE=$(which python)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
- PYTHON_EXECUTABLE=$(which python)
- 
++PYTHON_EXECUTABLE=${ORCHES_PYTHON_EXECUTABLE}
+
  LOGDIR=${PYTHONPATH}/logs_fastchat
+ export LOGDIR=$LOGDIR
+@@ -31,7 +32,7 @@ if tmux has-session -t $session_name 2>/dev/null; then
+ fi
+ tmux start-server
+ tmux new-session -s $session_name -n controller -d
+-tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+ tmux send-keys "${PYTHON_EXECUTABLE} -m fastchat.serve.controller --port ${CONTROLLER_PORT} --host $HOST_ADDR" Enter
+
+ echo "Wait 5 seconds ..."
+@@ -42,7 +43,7 @@ for i in $(seq 0 $((NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n reward_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+     if [[ "$VALUE_MODEL_PATH" =~ "dummy" ]]; then
+         command="pwd"
+     else
+@@ -56,7 +57,7 @@ for i in $(seq $((NUM_RM_WORKER)) $((NUM_LM_WORKER+NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n policy_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+
+     max_model_length=8192
+     max_num_sequences=0
 diff --git a/src/scripts/serve_gpu2.sh b/src/scripts/serve_gpu2.sh
+index 7f81025..be0a26d 100644
 --- a/src/scripts/serve_gpu2.sh
 +++ b/src/scripts/serve_gpu2.sh
-@@ -19,7 +19,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ POLICY_MODEL_PATH=$1
+ VALUE_MODEL_PATH=$2
+@@ -19,8 +19,9 @@ echo "${GPU_LIST[@]}"
  HOST_ADDR=$3
  CONTROLLER_PORT=$4
  WORKER_BASE_PORT=$5
 -export PYTHONPATH=$(pwd)
+-PYTHON_EXECUTABLE=$(which python)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
- PYTHON_EXECUTABLE=$(which python)
- 
++PYTHON_EXECUTABLE=${ORCHES_PYTHON_EXECUTABLE}
+
  LOGDIR=${PYTHONPATH}/logs_fastchat
+ export LOGDIR=$LOGDIR
+@@ -31,7 +32,7 @@ if tmux has-session -t $session_name 2>/dev/null; then
+ fi
+ tmux start-server
+ tmux new-session -s $session_name -n controller -d
+-tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+ tmux send-keys "${PYTHON_EXECUTABLE} -m fastchat.serve.controller --port ${CONTROLLER_PORT} --host $HOST_ADDR" Enter
+
+ echo "Wait 5 seconds ..."
+@@ -42,7 +43,7 @@ for i in $(seq 0 $((NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n reward_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+     if [[ "$VALUE_MODEL_PATH" =~ "dummy" ]]; then
+         command="pwd"
+     else
+@@ -56,7 +57,7 @@ for i in $(seq $((NUM_RM_WORKER)) $((NUM_LM_WORKER+NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n policy_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+
+     max_model_length=8192
+     max_num_sequences=0
 diff --git a/src/scripts/serve_gpu3_1-2.sh b/src/scripts/serve_gpu3_1-2.sh
+index e0522c3..d9f5f71 100644
 --- a/src/scripts/serve_gpu3_1-2.sh
 +++ b/src/scripts/serve_gpu3_1-2.sh
-@@ -19,7 +19,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ POLICY_MODEL_PATH=$1
+ VALUE_MODEL_PATH=$2
+@@ -19,8 +19,9 @@ echo "${GPU_LIST[@]}"
  HOST_ADDR=$3
  CONTROLLER_PORT=$4
  WORKER_BASE_PORT=$5
 -export PYTHONPATH=$(pwd)
+-PYTHON_EXECUTABLE=$(which python)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
- PYTHON_EXECUTABLE=$(which python)
- 
++PYTHON_EXECUTABLE=${ORCHES_PYTHON_EXECUTABLE}
+
  LOGDIR=${PYTHONPATH}/logs_fastchat
+ export LOGDIR=$LOGDIR
+@@ -31,7 +32,7 @@ if tmux has-session -t $session_name 2>/dev/null; then
+ fi
+ tmux start-server
+ tmux new-session -s $session_name -n controller -d
+-tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+ tmux send-keys "${PYTHON_EXECUTABLE} -m fastchat.serve.controller --port ${CONTROLLER_PORT} --host $HOST_ADDR" Enter
+
+ echo "Wait 5 seconds ..."
+@@ -42,7 +43,7 @@ for i in $(seq 0 $((NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n reward_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+     if [[ "$VALUE_MODEL_PATH" =~ "dummy" ]]; then
+         command="pwd"
+     else
+@@ -56,7 +57,7 @@ for i in $(seq $((NUM_RM_WORKER)) $((NUM_LM_WORKER+NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n policy_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+
+     max_model_length=8192
+     max_num_sequences=0
 diff --git a/src/scripts/serve_gpu3_2-1.sh b/src/scripts/serve_gpu3_2-1.sh
+index 1a19a38..5d23d92 100644
 --- a/src/scripts/serve_gpu3_2-1.sh
 +++ b/src/scripts/serve_gpu3_2-1.sh
-@@ -19,7 +19,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ POLICY_MODEL_PATH=$1
+ VALUE_MODEL_PATH=$2
+@@ -19,8 +19,9 @@ echo "${GPU_LIST[@]}"
  HOST_ADDR=$3
  CONTROLLER_PORT=$4
  WORKER_BASE_PORT=$5
 -export PYTHONPATH=$(pwd)
+-PYTHON_EXECUTABLE=$(which python)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
- PYTHON_EXECUTABLE=$(which python)
- 
++PYTHON_EXECUTABLE=${ORCHES_PYTHON_EXECUTABLE}
+
  LOGDIR=${PYTHONPATH}/logs_fastchat
+ export LOGDIR=$LOGDIR
+@@ -31,7 +32,7 @@ if tmux has-session -t $session_name 2>/dev/null; then
+ fi
+ tmux start-server
+ tmux new-session -s $session_name -n controller -d
+-tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+ tmux send-keys "${PYTHON_EXECUTABLE} -m fastchat.serve.controller --port ${CONTROLLER_PORT} --host $HOST_ADDR" Enter
+
+ echo "Wait 5 seconds ..."
+@@ -42,7 +43,7 @@ for i in $(seq 0 $((NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n reward_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+     if [[ "$VALUE_MODEL_PATH" =~ "dummy" ]]; then
+         command="pwd"
+     else
+@@ -56,7 +57,7 @@ for i in $(seq $((NUM_RM_WORKER)) $((NUM_LM_WORKER+NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n policy_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+
+     max_model_length=8192
+     max_num_sequences=0
 diff --git a/src/scripts/serve_gpu4.sh b/src/scripts/serve_gpu4.sh
+index 407a762..4bb5d9b 100644
 --- a/src/scripts/serve_gpu4.sh
 +++ b/src/scripts/serve_gpu4.sh
-@@ -19,7 +19,8 @@
+@@ -1,6 +1,6 @@
+ #!/bin/bash
+
+-conda activate tts
++: "${ORCHES_PYTHON_EXECUTABLE:?Set ORCHES_PYTHON_EXECUTABLE to the UV environment Python}"
+
+ POLICY_MODEL_PATH=$1
+ VALUE_MODEL_PATH=$2
+@@ -19,8 +19,9 @@ echo "${GPU_LIST[@]}"
  HOST_ADDR=$3
  CONTROLLER_PORT=$4
  WORKER_BASE_PORT=$5
 -export PYTHONPATH=$(pwd)
+-PYTHON_EXECUTABLE=$(which python)
 +: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
 +export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
- PYTHON_EXECUTABLE=$(which python)
- 
++PYTHON_EXECUTABLE=${ORCHES_PYTHON_EXECUTABLE}
+
  LOGDIR=${PYTHONPATH}/logs_fastchat
+ export LOGDIR=$LOGDIR
+@@ -31,7 +32,7 @@ if tmux has-session -t $session_name 2>/dev/null; then
+ fi
+ tmux start-server
+ tmux new-session -s $session_name -n controller -d
+-tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+ tmux send-keys "${PYTHON_EXECUTABLE} -m fastchat.serve.controller --port ${CONTROLLER_PORT} --host $HOST_ADDR" Enter
+
+ echo "Wait 5 seconds ..."
+@@ -42,7 +43,7 @@ for i in $(seq 0 $((NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n reward_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+     if [[ "$VALUE_MODEL_PATH" =~ "dummy" ]]; then
+         command="pwd"
+     else
+@@ -56,7 +57,7 @@ for i in $(seq $((NUM_RM_WORKER)) $((NUM_LM_WORKER+NUM_RM_WORKER-1)))
+ do
+     WORKER_PORT=$((WORKER_BASE_PORT+i))
+     tmux new-window -n policy_$i
+-    tmux send-keys "source ~/.bashrc && conda activate tts && export LOGDIR=${LOGDIR} && cd ${PYTHONPATH} " Enter
++    tmux send-keys "export LOGDIR=${LOGDIR} && export PYTHONPATH=${PYTHONPATH} && cd ${PYTHONPATH} " Enter
+
+     max_model_length=8192
+     max_num_sequences=0

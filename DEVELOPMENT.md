@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4B.4A complete) | 159 tests; raw event/worker-token path complete; selection hook, real run, and launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.4B complete) | 164 tests; generation-only text collector/control flow complete; UV trace lock, real run, PRM evidence, and experiment launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -1216,6 +1216,141 @@ legal actions need stable candidate IDs, and beam-search selection must emit the
 actual selected/pruned partition. Until that hook runs and writes events on the
 5070 Ti, `artifacts/traces/` still contains no real policy trace.
 
+### M4B.4B Implementation Checkpoint: Executable Text Control-Flow Collector
+
+#### Scope
+
+This checkpoint connects the exact worker evidence from M4B.4A to the real
+compute-optimal-TTS beam-search control flow. A patched upstream request can now
+write a complete raw generation event file containing every generated policy
+candidate and the actual PRM-driven selected/pruned partition. The collector
+does not inspect, replace, or approximate PRM scoring.
+
+The executable path is intentionally limited to the paper's text setting
+`num_sequence=1`. No GPU is visible in this workspace, so the patch has been
+applied and syntax-validated but no model request or real event file has been
+produced. The result remains generation-only and `paper_eligible=false` because
+PRM input tensors, layer outputs, scores, latency, and energy are absent.
+
+#### Implementation Sequence
+
+1. Added `ComputeOptimalTtsCollectorConfig`, a strict JSON boundary for event
+   location, dtype, dataset revision, tokenizer, policy, vLLM, collector, and
+   opaque selector identities. Relative output paths resolve from the config
+   file, and a checked example lives in `configs/workloads/`.
+2. Added `create_compute_optimal_tts_session`. It derives deterministic request
+   and event IDs from upstream `question_<id>/record_<sample>.jsonl`, freezes
+   seed/sampling/width metadata before generation, and is enabled only when
+   `ORCHES_POLICY_COLLECTOR_CONFIG` is set.
+3. Added `ComputeOptimalTtsSession` as the mutable per-request bridge shared by
+   copied upstream environments. Each worker result becomes one sanitized
+   generation event with stable call/candidate/RNG stream IDs. Decoded text and
+   upstream usage fields are never copied.
+4. Instrumented `CoTEnv.update_legal_actions` before text filtering. All raw
+   width-sized worker outputs are recorded; accepted legal actions retain their
+   corresponding candidate IDs. Duplicate actions, non-stop outputs, and other
+   upstream-rejected candidates remain visible as generated then pruned.
+5. Instrumented `CoTEnv.step` to map the selected legal action back to exactly
+   one candidate. That ID becomes the parent of the next exact model call, so
+   the next prompt and KV extension are validated against the branch actually
+   taken.
+6. Extended `LanguageNode` with the opaque candidate ID. Immediately after
+   compute-optimal-TTS performs its global `heapq.nsmallest` reduction, the
+   collector records those node IDs as selected and every other generated ID
+   in that step as pruned. Existing PRM values and ranking code are unchanged.
+7. Wrapped `beam_search` at the evaluator boundary. Success first rebuilds the
+   complete event list through `PolicyRequestTrace`; only a valid tree is
+   written as successful. Exceptions write `failed`, and CUDA/out-of-memory
+   errors write `oom`; neither status can be converted to a trace.
+8. Added the control-flow integration as external patch `0002`, ordered after
+   the exact-token worker patch. The patch script now checks, applies, and
+   reverses the complete series atomically against upstream commit `0ee2578`.
+9. Removed the upstream launchers' Conda activation in the external patch.
+   They require `ORCHES_PYTHON_EXECUTABLE` and `ORCHES_PYTHONPATH`, allowing an
+   absolute interpreter from a frozen UV project to survive tmux boundaries.
+   The 5070-compatible and paper-server UV locks are not guessed here; they
+   remain separate artifacts to freeze after host compatibility probing.
+
+#### Runtime Event Path
+
+```text
+beam_search(problem, seed, width=K, beam=1)
+  -> create request_started event
+  -> CoTEnv reset submits exact root prompt to vLLM
+  -> vLLM cumulative snapshots produce exact K output token sequences
+  -> record generation before decoded-action filtering
+  -> existing PRM scores accepted legal actions without collector changes
+  -> existing global beam heap retains one LanguageNode candidate ID
+  -> record selected/pruned partition
+  -> CoTEnv.step binds selected ID as the next generation parent
+  -> repeat until terminal/depth/error
+  -> validate full token-prefix, width, KV, ready-order, and selection graph
+  -> atomically write success, failed, or OOM raw events
+```
+
+The stable candidate identifier is based on request, generation step, call
+ordinal, and vLLM output index. It does not depend on decoded text or character
+count. For every successful step:
+
+```text
+generated IDs = selected IDs union pruned IDs
+selected IDs intersect pruned IDs = empty
+count(outputs per call) = tree_max_width
+next parent ID = prior selected ID
+```
+
+#### Beam-Size Boundary
+
+The generic Policy-v1 schema supports multiple retained parents. The frozen
+upstream does not implement that same width meaning: root generation requests
+`tree_max_width` outputs, while later calls request
+`tree_max_width / beam_size` outputs per parent. For `beam_size > 1`, those
+calls violate the schema contract that every selected parent generates
+`search_width` children. The factory therefore rejects that mode explicitly.
+The paper's main compute-optimal-TTS configuration uses `num_sequence=1`, so
+this guard does not alter the target text experiment.
+
+#### Paper Correspondence
+
+| M4B.4B implementation | Paper relationship |
+|---|---|
+| Width-sized exact worker output set before filtering | Sec. 2.2 generation workload and Sec. 3.1 candidate parallelism |
+| Existing PRM ranking retained unchanged | Pipeline [18] used by Sec. 5.1, recorded as opaque selector evidence |
+| Actual global selected/pruned IDs | Sec. 3.2 branch dependency and T3 dead-KV input |
+| Selected candidate becomes next exact parent | Sec. 3.2 serialization and exact KV ancestry |
+| Full-tree pre-write validation | Prevents malformed workload evidence from entering baseline comparison |
+| Failed/OOM event retention | Fair matrix accounting; unsuccessful requests cannot disappear |
+| UV-provided interpreter boundary | Reproducible source/runtime separation for local and server collection |
+
+#### Verification
+
+New tests execute a two-step session using exact prompt/output token arrays,
+interleaved logical readiness, and generated-versus-materialized KV counts;
+the written events rebuild into the expected policy trace. Additional tests
+cover OOM persistence and rejection as a successful trace, strict config and
+dataset identity, relative path normalization, the example config, and the
+explicit multi-beam rejection.
+
+The two-patch series was checked on a clean `0ee2578` checkout, applied in
+order, checked for whitespace, compiled across every changed Python file,
+checked with `bash -n` across every changed launcher, reversed in order, and
+checked again on the clean upstream tree. The complete ORCHES suite passes 164
+tests.
+
+#### Current Boundary And Next Milestone
+
+The software path needed to obtain a real generation-only MATH-500 event stream
+is now implemented. This checkpoint has not produced that stream because no GPU
+run occurred. It also does not make complete ORCHES latency or power claims:
+policy generation can be replayed, but full TTC timing still requires real PRM
+operator/token evidence, and hardware results still require the shared
+GPU/AttAcc/Duplex/ORCHES runner.
+
+M4B.5 will first probe the 5070 Ti, freeze a compatible local UV lock and the
+separate historical server lock, convert a directory of terminal event files
+into one Policy-v1 trace/manifest/report, and run a repeat-hash width-2 pilot.
+PRM layer instrumentation remains after that pilot, per the requested order.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -1230,3 +1365,4 @@ actual selected/pruned partition. Until that hook runs and writes events on the
 | 2026-07-27 | M4B.2 | Connected schema v2 to per-token ORCHES replay with multi-parent KV, exact verifier calls, ordered pruning, and phase-complete activity accounting; 141 tests pass, while real collection remains pending. |
 | 2026-07-27 | M4B.3 | Added a separately versioned generation-only policy trace, exact call/RNG/token/KV semantics, opaque/synthetic selection modes, reproducibility manifests, and strict CLI validation; 149 tests pass, while no real trace has yet been collected. |
 | 2026-07-27 | M4B.4A | Added strict raw policy events, deterministic event-to-trace conversion, vLLM snapshot/token/KV evidence, a sanitized compute-optimal-TTS adapter, and an audited external worker patch; 159 tests pass, while the search-tree selection hook and real run remain pending. |
+| 2026-07-27 | M4B.4B | Added per-request collector sessions/config, stable candidate IDs through accepted actions and search nodes, actual global selection capture, success/OOM validation, ordered external patches, and UV-only upstream launch boundaries; 164 tests pass, while the first GPU event stream and PRM enrichment remain pending. |

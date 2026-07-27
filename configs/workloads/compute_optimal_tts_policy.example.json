@@ -1,0 +1,27 @@
+{
+  "config_schema_version": 1,
+  "event_dir": "../../artifacts/raw/compute-optimal-tts-pilot",
+  "dataset": "MATH-500",
+  "dataset_revision": "REPLACE_WITH_DATASET_COMMIT",
+  "dtype": "bfloat16",
+  "tokenizer": {
+    "name": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "REPLACE_WITH_TOKENIZER_COMMIT"
+  },
+  "policy_model": {
+    "name": "Qwen/Qwen2.5-1.5B-Instruct",
+    "revision": "REPLACE_WITH_POLICY_COMMIT"
+  },
+  "inference_engine": {
+    "name": "vllm",
+    "revision": "0.6.4.post1"
+  },
+  "collector": {
+    "name": "orches.compute-optimal-tts",
+    "revision": "REPLACE_WITH_ORCHES_COMMIT"
+  },
+  "selector": {
+    "name": "REPLACE_WITH_PRM_MODEL",
+    "revision": "REPLACE_WITH_PRM_COMMIT"
+  }
+}

@@ -255,8 +255,9 @@ orches/
 generated-token round、materialized KV、多 parent lineage 和 verifier/selection 顺序接入
 T1/T2/T3。policy contract 支持 single-step、synthetic selector 和绑定原始 artifact hash 的
 opaque selector。raw event、vLLM exact-token snapshot、event-to-trace conversion 和上游 worker
-patch 已实现；accepted-action/search-selection hook 尚未实现，因此目前没有 evaluation trace，也不能产出
-论文数值对齐结论。
+patch 已实现；accepted action 绑定、candidate ID 树上传递、PRM 驱动的实际 global beam selection
+以及 success/failed/OOM 终止写盘也已经接通，支持论文 `num_sequence=1` 配置。当前仍未在 GPU 上运行，
+也没有 PRM token/score trace，因此目前没有 evaluation trace，不能产出论文数值对齐结论。
 
 实现：
 
@@ -494,7 +495,7 @@ fragmentation/compaction difference
 
 | 论文位置 | 论文机制 | 计划实现 |
 |---|---|---|
-| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `collectors/policy_events.py`, `compute_optimal_tts.py`, policy/TTC schemas, `replay_v2.py`；selection hook 待实现 |
+| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `collectors/policy_events.py`, `compute_optimal_tts.py`, policy/TTC schemas, `replay_v2.py`；generation 与 opaque PRM selection 已接通，PRM tensors/scores 待实现 |
 | Sec. 3.1, Fig. 4-5 | variable parallelism、shared/unique KV | `models/operators.py`, `scheduler/roofline.py` |
 | Sec. 3.2, Fig. 6 | branch dependency 和相互等待 | `sim/event.py`, `predictor/pipeline.py` |
 | Sec. 3.3 | pruning 产生 fragmentation | `memory/allocator.py`, `replay_v2.py` ordered pruning |

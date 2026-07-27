@@ -1,0 +1,331 @@
+diff --git a/src/envs/base_env.py b/src/envs/base_env.py
+index 620a52e..273095b 100644
+--- a/src/envs/base_env.py
++++ b/src/envs/base_env.py
+@@ -123,6 +123,8 @@ class CoTEnv(BaseEnv):
+         self.add_step_prompt = config.get("add_step_prompt", False)
+         self.direct_io = config.get("direct_io", 0)
+         self.double_line_break = config.get("double_line_break", 0)
++        self.policy_collector = config.get("policy_collector")
++        self._collector_parent_candidate_id = None
+         # self.prm_step_tag = rm_call.prm_step_tag  # "ки\n"
+         self.prm_step_tag = "ки\n"
+         self.sep = sep
+@@ -155,6 +157,7 @@ class CoTEnv(BaseEnv):
+         self.token_history = []
+         self.prob_history = []
+         self.model_history = []
++        self._collector_parent_candidate_id = None
+         self._init_query = self.build_query_str(
+             cot_examples=self._cot_example_str,
+             cot_task_desc=self._task_desc_str,
+@@ -181,6 +184,17 @@ class CoTEnv(BaseEnv):
+         return self.get_state(model_name='raw'), info
+
+     def step(self, action, update_legal_action=True, model_name="", custom_n=0, reward=0.0, num_token=0, prob=0.0):
++        if self.policy_collector is not None:
++            matching_actions = [
++                item for item in self._legal_actions if item["action"] == action
++            ]
++            if len(matching_actions) != 1:
++                raise RuntimeError(
++                    "cannot map selected action to one collector candidate"
++                )
++            self._collector_parent_candidate_id = matching_actions[0][
++                "collector_candidate_id"
++            ]
+         self.action_history.append(action)
+         self.reward_history.append(reward)
+         self.token_history.append(num_token)
+@@ -263,6 +277,16 @@ class CoTEnv(BaseEnv):
+                     **self.config["generation_config"],
+                 ),
+             )
++            collector_candidate_ids = [None] * len(result.text)
++            if self.policy_collector is not None:
++                collector_candidate_ids = (
++                    self.policy_collector.record_generation_result(
++                        result,
++                        step_index=len(self.action_history),
++                        parent_candidate_id=self._collector_parent_candidate_id,
++                        rng_seed=self.config["generation_config"]["seed"],
++                    )
++                )
+             texts = result.text  # [text1, text2]
+             logps_avg_by_len = result.logp_avg_by_len  # [-0.10557132510029904, -0.23053854329903292]
+             token_len = result.num_tokens  # [212, 192]
+@@ -278,6 +302,7 @@ class CoTEnv(BaseEnv):
+
+         text_list, prob_list, num_token_list = [], [], []
+         model_names, model_ids = [], []
++        accepted_finish_reasons, accepted_collector_ids = [], []
+         next_state_terminated = {}
+         raw_text_list = []
+
+@@ -309,6 +334,8 @@ class CoTEnv(BaseEnv):
+                 next_state_terminated[processed_act] = terminated
+                 model_names.append(temp_model_names[i])
+                 model_ids.append(temp_model_ids[i])
++                accepted_finish_reasons.append(finish_reason)
++                accepted_collector_ids.append(collector_candidate_ids[i])
+             elif force_update or self.direct_io:
+                 text_list.append(processed_act)
+                 raw_text_list.append(texts[i])
+@@ -317,6 +344,8 @@ class CoTEnv(BaseEnv):
+                 next_state_terminated[processed_act] = terminated
+                 model_names.append(temp_model_names[i])
+                 model_ids.append(temp_model_ids[i])
++                accepted_finish_reasons.append(finish_reason)
++                accepted_collector_ids.append(collector_candidate_ids[i])
+
+         if len(prob_list) == 0:
+             print_with_rank("state: {}".format(self.get_state(model_name='raw')))
+@@ -329,18 +358,39 @@ class CoTEnv(BaseEnv):
+         # prob_list = np.array(prob_list)
+         # prob_list = prob_list / np.sum(prob_list)  # normalize probability
+
+-        _legal_actions = [{
+-            "action": action,
+-            "prob": prob,
+-            "num_token": n_token,
+-            "finish_reason": finish_reason,
+-            "model_name": model_name,
+-            "model_id": model_id,
+-            "messages": messages,
+-            "stop_str": stop_str,
+-            "raw_action": raw_action,
+-        } for action, prob, n_token, finish_reason, model_name, model_id, raw_action in zip(text_list, prob_list, num_token_list,
+-            finish_reason_list, model_names, model_ids, raw_text_list)]
++        _legal_actions = [
++            {
++                "action": action,
++                "prob": prob,
++                "num_token": n_token,
++                "finish_reason": finish_reason,
++                "model_name": model_name,
++                "model_id": model_id,
++                "messages": messages,
++                "stop_str": stop_str,
++                "raw_action": raw_action,
++                "collector_candidate_id": collector_candidate_id,
++            }
++            for (
++                action,
++                prob,
++                n_token,
++                finish_reason,
++                model_name,
++                model_id,
++                raw_action,
++                collector_candidate_id,
++            ) in zip(
++                text_list,
++                prob_list,
++                num_token_list,
++                accepted_finish_reasons,
++                model_names,
++                model_ids,
++                raw_text_list,
++                accepted_collector_ids,
++            )
++        ]
+
+         if len(self.llm_gen_fns) == 1:
+             completion_tokens = result.completion_tokens
+@@ -443,6 +493,7 @@ class CoTEnv(BaseEnv):
+         env.model_history = copy.deepcopy(self.model_history)
+         env._init_query = copy.deepcopy(self._init_query)
+         env._next_state_terminated = copy.deepcopy(self._next_state_terminated)
++        env._collector_parent_candidate_id = self._collector_parent_candidate_id
+         return env
+
+     @property
+diff --git a/src/reason/evaluation/methods.py b/src/reason/evaluation/methods.py
+index bc1cf92..f41ae5c 100644
+--- a/src/reason/evaluation/methods.py
++++ b/src/reason/evaluation/methods.py
+@@ -5,10 +5,11 @@ This file is largely borrowed from OpenR (https://github.com/openreasoner/openr)
+ from dataclasses import dataclass
+ import functools
+ from typing import Dict, List
+-from reason.inference.lm_call import LMCallingConfig, LanguageModelCallingFunction
++from orches.collectors.compute_optimal_tts import create_compute_optimal_tts_session
+ from reason.inference.rm_call import RewardModelCallingFunction
+ from reason.evaluation.evaluator import SolutionOutput, Task, TreeSearchSolutionOutput
+ from reason.guided_search.tree import SearchTree
++from reason.inference.lm_call import LMCallingConfig, LanguageModelCallingFunction
+
+
+ @dataclass
+@@ -55,45 +56,69 @@ def beam_search(
+     lm_calls: List[LanguageModelCallingFunction],
+     rm_call: RewardModelCallingFunction,
+ ) -> SolutionOutput:
+-    task = Task(task_name=config.task_name)
+-    env = task.env_fn(
+-        config={
+-            "max_actions": config.tree_max_width,
+-            "max_length": config.tree_max_depth,
+-            "beam_size": config.beam_size,
+-            "cot_prompt": config.cot_prompt,
+-            "stop_str": config.stop_str,
+-            "sep": config.sep,
+-            "generation_config": {
+-                "max_new_tokens": gen_config.max_new_tokens,
+-                "temperature": gen_config.temperature,
+-                "top_p": gen_config.top_p,
+-                "top_k": gen_config.top_k,
++    policy_collector = create_compute_optimal_tts_session(
++        problem_inst, config, gen_config
++    )
++    try:
++        task = Task(task_name=config.task_name)
++        env = task.env_fn(
++            config={
++                "max_actions": config.tree_max_width,
++                "max_length": config.tree_max_depth,
++                "beam_size": config.beam_size,
++                "cot_prompt": config.cot_prompt,
++                "stop_str": config.stop_str,
++                "sep": config.sep,
++                "generation_config": {
++                    "max_new_tokens": gen_config.max_new_tokens,
++                    "temperature": gen_config.temperature,
++                    "top_p": gen_config.top_p,
++                    "top_k": gen_config.top_k,
++                    "seed": gen_config.seed,
++                },
++                "is_few_shot": config.is_few_shot,
++                "add_step_prompt": config.add_step_prompt,
++                "direct_io": config.direct_io,
++                "double_line_break": config.double_line_break,
++                "model_names": config.model_names,
++                "policy_collector": policy_collector,
+             },
+-            "is_few_shot": config.is_few_shot,
+-            "add_step_prompt": config.add_step_prompt,
+-            "direct_io": config.direct_io,
+-            "double_line_break": config.double_line_break,
+-            "model_names": config.model_names,
+-        },
+-        math_problems=[{
+-            "question": problem_inst["question"],
+-            "answer": problem_inst["extracted_groundtruth"] if "extracted_groundtruth" in problem_inst else task.extract_groundtruth(problem_inst["answer"]),
+-        }],
+-        llm_gen_fns=lm_calls,
+-        rm_call=rm_call,
+-        update_legal_action=False,
+-    )
++            math_problems=[
++                {
++                    "question": problem_inst["question"],
++                    "answer": problem_inst["extracted_groundtruth"]
++                    if "extracted_groundtruth" in problem_inst
++                    else task.extract_groundtruth(problem_inst["answer"]),
++                }
++            ],
++            llm_gen_fns=lm_calls,
++            rm_call=rm_call,
++            update_legal_action=False,
++        )
+
+-    search_tree = SearchTree(cfg={"model_names": config.model_names, "direct_io": config.direct_io, "max_actions": config.tree_max_width})
+-    traj_list = search_tree.beam_search(env, config.beam_size, config.tree_max_depth, rm_call)
++        search_tree = SearchTree(
++            cfg={
++                "model_names": config.model_names,
++                "direct_io": config.direct_io,
++                "max_actions": config.tree_max_width,
++            }
++        )
++        traj_list = search_tree.beam_search(
++            env, config.beam_size, config.tree_max_depth, rm_call
++        )
++        if policy_collector is not None:
++            policy_collector.finish_success()
+
+-    return TreeSearchSolutionOutput(
+-        solutions=[t["text"] for t in traj_list],
+-        completion_tokens=[t["api_completion_tokens"] for t in traj_list],
+-        tree_completion_tokens=[t["tree_completion_tokens"] for t in traj_list],
+-        reward_history=[t["reward_history"] for t in traj_list],
+-        token_history=[t["token_history"] for t in traj_list],
+-        prob_history=[t["prob_history"] for t in traj_list],
+-        model_history=[t["model_history"] for t in traj_list],
+-    )
++        return TreeSearchSolutionOutput(
++            solutions=[t["text"] for t in traj_list],
++            completion_tokens=[t["api_completion_tokens"] for t in traj_list],
++            tree_completion_tokens=[t["tree_completion_tokens"] for t in traj_list],
++            reward_history=[t["reward_history"] for t in traj_list],
++            token_history=[t["token_history"] for t in traj_list],
++            prob_history=[t["prob_history"] for t in traj_list],
++            model_history=[t["model_history"] for t in traj_list],
++        )
++    except BaseException as error:
++        if policy_collector is not None:
++            policy_collector.finish_exception(error)
++        raise
+diff --git a/src/reason/guided_search/tree.py b/src/reason/guided_search/tree.py
+index 247749b..56de7fe 100644
+--- a/src/reason/guided_search/tree.py
++++ b/src/reason/guided_search/tree.py
+@@ -154,6 +154,7 @@ class LanguageNode(Node):
+     text_state: Optional[str] = None
+     last_action: Optional[str] = None
+     num_generated_token: Optional[int] = None
++    collector_candidate_id: Optional[str] = None
+
+     def __init__(
+         self,
+@@ -166,6 +167,7 @@ class LanguageNode(Node):
+         parent_value: float = 0.0,
+         num_generated_token: Optional[int] = None,
+         model_name: str = "",
++        collector_candidate_id: Optional[str] = None,
+     ) -> None:
+         super().__init__(parent, prior_p, initial_value, parent_value)
+         self.text_state = text_state
+@@ -176,6 +178,7 @@ class LanguageNode(Node):
+         self.has_collected_token_num = False
+
+         self.model_name = model_name
++        self.collector_candidate_id = collector_candidate_id
+
+     def get_path(self):
+         ans = []
+@@ -326,6 +329,18 @@ class SearchTree:
+                             new_env = cur_env.copy()
+                             heapq.heappush(top_k_nodes, (-c_q_plus_a, -c_value, -c_parent_value, c_node, new_env))
+             top_k_nodes = heapq.nsmallest(k, top_k_nodes)  # nsmallest since we negate the value
++            policy_collector = simulate_env.config.get("policy_collector")
++            if policy_collector is not None and policy_collector.has_pending_step(i):
++                selected_candidate_ids = tuple(
++                    node.collector_candidate_id for _, _, _, node, _ in top_k_nodes
++                )
++                if not selected_candidate_ids or any(
++                    candidate_id is None for candidate_id in selected_candidate_ids
++                ):
++                    raise RuntimeError(
++                        "selected search nodes are missing collector candidate IDs"
++                    )
++                policy_collector.record_selection(i, selected_candidate_ids)
+
+             # expand selected nodes
+             for q_plus_a, value, parent_value, node, new_env in top_k_nodes:
+@@ -484,6 +499,7 @@ class SearchTree:
+                     parent_value=leaf_value,
+                     num_generated_token=action_dict["num_token"],
+                     model_name=model_name,
++                    collector_candidate_id=action_dict["collector_candidate_id"],
+                 )
+             else:
+                 node.children[action] = LanguageNode(
+@@ -496,6 +512,7 @@ class SearchTree:
+                     parent_value=leaf_value,
+                     num_generated_token=action_dict["num_token"],
+                     model_name=model_name,
++                    collector_candidate_id=action_dict["collector_candidate_id"],
+                 )
+             # set terminal node here
+             if simulate_env._next_state_terminated[action]:

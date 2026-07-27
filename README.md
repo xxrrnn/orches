@@ -73,17 +73,19 @@ uv run orches validate-policy-trace artifacts/traces/policy.jsonl \
 Generation-only traces preserve exact policy token/KV control flow but remain
 ineligible for complete paper results until real verifier evidence is added.
 
-Audit the frozen compute-optimal-TTS exact-token patch and validate one raw
-per-request event log:
+Audit the frozen compute-optimal-TTS exact-token/control-flow patch series and
+validate one raw per-request event log:
 
 ```bash
 bash scripts/compute_optimal_tts_patch.sh --check
 uv run orches validate-policy-events artifacts/raw/run/request.events.jsonl --json
 ```
 
-The patch and raw event converter are implemented, but the upstream
-search-selection hook and first GPU collection are still pending. See
-`integrations/compute-optimal-tts/README.md` for the exact boundary.
+The patched pipeline now binds generated candidates through upstream legal
+actions and records the actual PRM-driven beam selection. It also requires an
+external UV interpreter instead of activating Conda. No GPU collection has run
+in this workspace; see `integrations/compute-optimal-tts/README.md` for the
+configuration, pilot command, and remaining evidence boundary.
 
 Validate a frozen model architecture and run the native PIM smoke benchmark:
 
