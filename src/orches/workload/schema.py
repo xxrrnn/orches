@@ -245,6 +245,10 @@ class TtcRequestTrace:
             raise WorkloadTraceError(
                 f"unsupported trace schema version {self.trace_schema_version!r}"
             )
+        if self.provenance.source_kind is not SourceKind.SYNTHETIC:
+            raise WorkloadTraceError(
+                "schema v1 is synthetic-only; collected traces require schema v2"
+            )
         for name, value in (
             ("request.request_id", self.request_id),
             ("request.dataset", self.dataset),

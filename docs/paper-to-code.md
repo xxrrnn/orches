@@ -11,7 +11,7 @@ when both implementation and verification evidence exist.
 | Sec. 5.1 | PIM has 2048 banks | hierarchy fields; `PimHardwareConfig.derived_bank_count` | `test_pim_paper_configuration`; inconsistent-bank failure test | M1 complete |
 | Sec. 4.1, 5.1 | 16 multipliers/adders per bank | `gemv_lanes_per_bank`; `total_gemv_lanes` | `test_pim_paper_configuration` | M1 contract complete; timing deferred to M2/M4 |
 | Sec. 5.1 | Timing and unit energy inherit AttAcc | timing/refresh fields; `third_party.lock` | config provenance tests; AttAcc smoke evidence in `DEVELOPMENT.md` | Timing contract complete; energy deferred to M4 |
-| Sec. 2.2, Fig. 3 | Generation/verification TTC tree | v1: `workload/schema.py`, `io.py`, `synthetic.py`; v2 collector contract: `docs/trace-collection-plan.md` | v1 synthetic invariant/round-trip tests; v2 exact-token, KV-lineage, multi-selection, and verifier tests pending | M2 synthetic schema complete; paper-facing v2 pending |
+| Sec. 2.2, Fig. 3 | Generation/verification TTC tree | v1 synthetic: `workload/schema.py`; v2: `schema_v2.py`, `io_v2.py`, `migration.py` | Exact-token round trip, width 4, beam 3, multi-parent, KV lineage, scalar/pairwise verifier, synthetic-only migration | M4B.1 schema complete; real collectors pending |
 | Sec. 3.1, Fig. 4-5 | Variable width and shared/unique KV behavior | `models/operators.py` | Arithmetic-intensity and DAG tests | M2 primitive complete |
 | Sec. 4.1, Fig. 7 | Reversible PIM hierarchy and AttAcc commands | `sim/pim.py`, `sim/pim_trace.py` | Address and native integration tests | M2A complete |
 | Sec. 5.1 | Policy/PRM model shapes | `configs/models/`; `models/transformer.py` | Six profile tests | Policy shapes inherited; tuned PRMs assumed |

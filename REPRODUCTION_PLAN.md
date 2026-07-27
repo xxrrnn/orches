@@ -250,6 +250,10 @@ orches/
 
 ### Phase 2：构建 TTC workload trace
 
+状态：schema v2 已实现 exact token/mask、逻辑 KV block lineage、`search_width` 与
+`beam_size` 分离、scalar PRM/pairwise judge 和有序 selection events。真实 pipeline collector
+尚未实现，因此目前没有 evaluation trace。
+
 实现：
 
 1. 定义版本化 JSONL schema，每个 request/step 至少记录：

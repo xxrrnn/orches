@@ -105,7 +105,7 @@ For width greater than two, KV retention follows the actual selection events:
    `prompt_tokens + sum(generated_tokens)`.
 
 The paper's main text setup uses `num_sequence=1`, so one branch normally
-survives each text step. Schema v2 will still use `selected_candidate_ids` and
+survives each text step. Schema v2 uses `selected_candidate_ids` and
 explicit parent/KV-block references so width and beam size are not conflated.
 For LLaVA-CoT width 4, the trace retains the complete pairwise elimination
 order; memory replay can free each losing candidate at the recorded judge
@@ -113,15 +113,14 @@ decision instead of pretending all candidates were pruned simultaneously.
 
 Absolute token wall time is diagnostic only. Replay scales logical token-ready
 positions to the simulated generation event, so a 5070 Ti does not leak its
-latency into the Orin result. For deterministic collection, schema v2 will
-record `token_ready_index`; schema v1 compatibility may serialize those indices
-as monotonic `token_timestamps_us` values.
+latency into the Orin result. Schema v2 records a request-global contiguous
+`token_ready_indices` order. Schema v1 retains synthetic monotonic
+`token_timestamps_us` values only for compatibility.
 
-## Current Schema Gap
+## Implemented Schema and Remaining Collector Gap
 
-The current schema v1 is adequate only for synthetic one-parent beam search
-with a scalar PRM. Three paper-facing requirements need schema v2 before real
-collection:
+Schema v2 is implemented in `src/orches/workload/schema_v2.py` with strict JSON
+parsing in `io_v2.py`. It closes three structural gaps in synthetic schema v1:
 
 1. Technique 2's small PRM is the first 10 layers of the original PRM. A real
    text trace must contain both the layer-10 early-exit score and the final
@@ -134,11 +133,16 @@ collection:
    `unique_kv_tokens == generated_tokens`, which is too restrictive for general
    beam selection and may miss template/special-token effects.
 
-Schema v2 will add an explicit verifier kind (`scalar_prm` or
-`pairwise_tournament`), ordered verifier-call records, selected-candidate lists,
-and KV lineage blocks with exact model-input/materialized lengths. It will not
-invent a numeric vision score when the source pipeline only produced a pairwise
-choice.
+The implementation provides `scalar_prm` and `pairwise_judge` calls, ordered
+selection events, selected-candidate lists, exact input/generated token IDs,
+separate output-KV materialization, and append-only KV lineage blocks. It does
+not invent a numeric vision score when the source pipeline only produced a
+pairwise choice. Tests cover width 4, beam size 3, two retained parents, and
+pairwise elimination order.
+
+The remaining gap is collection, not representation: no compute-optimal-TTS or
+LLaVA-CoT run has emitted a real schema-v2 trace yet. Synthetic v1 migration is
+explicitly ineligible because v1 never contained real token IDs.
 
 ## Text Pipeline Audit
 
@@ -356,8 +360,8 @@ a documented determinism result.
 
 ## Implementation Order
 
-1. Add schema v2 verifier calls, exact token/KV lineage, multi-selection
-   semantics, and a v1 migration path limited to synthetic traces.
+1. [Complete] Add schema v2 verifier calls, exact token/KV lineage,
+   multi-selection semantics, and synthetic-only v1 migration.
 2. Add host probing and collection manifests.
 3. Implement the text trace sink and complete-tree export.
 4. Implement layer-10/final PRM scoring with architecture-specific tests.

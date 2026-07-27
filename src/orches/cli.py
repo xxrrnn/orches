@@ -141,6 +141,7 @@ def _trace_summary(path: Path) -> dict[str, object]:
     return {
         "path": str(path),
         "sha256": trace_sha256(path),
+        "schema_versions": sorted({trace.trace_schema_version for trace in traces}),
         "requests": len(traces),
         "steps": sum(len(trace.steps) for trace in traces),
         "candidates": sum(trace.candidate_count for trace in traces),
@@ -150,6 +151,7 @@ def _trace_summary(path: Path) -> dict[str, object]:
         "source_kinds": sorted(
             {trace.provenance.source_kind.value for trace in traces}
         ),
+        "beam_sizes": sorted({getattr(trace, "beam_size", 1) for trace in traces}),
     }
 
 
@@ -157,6 +159,7 @@ def _print_trace_summary(summary: dict[str, object]) -> None:
     print(f"valid trace: {summary['path']}")
     for key in (
         "sha256",
+        "schema_versions",
         "requests",
         "steps",
         "candidates",
@@ -164,6 +167,7 @@ def _print_trace_summary(summary: dict[str, object]) -> None:
         "selected_path_tokens",
         "modalities",
         "source_kinds",
+        "beam_sizes",
     ):
         print(f"  {key}: {summary[key]}")
 

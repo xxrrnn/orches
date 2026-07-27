@@ -9,6 +9,7 @@ from typing import Any, Mapping, TypeAlias
 
 from ..errors import WorkloadTraceError
 from .schema import (
+    TRACE_SCHEMA_VERSION,
     CandidateTrace,
     Modality,
     ModelRef,
@@ -19,6 +20,8 @@ from .schema import (
     TraceProvenance,
     TtcRequestTrace,
 )
+from .schema_v2 import TRACE_SCHEMA_VERSION_V2, TtcRequestTraceV2
+from .io_v2 import parse_request_v2
 
 
 RawMapping: TypeAlias = Mapping[str, Any]
@@ -187,8 +190,8 @@ def _step(raw_value: Any, path: str) -> StepTrace:
     )
 
 
-def parse_request(raw_value: Any, path: str = "request") -> TtcRequestTrace:
-    """Parse one strict request object and validate cross-step control flow."""
+def _parse_request_v1(raw_value: Any, path: str) -> TtcRequestTrace:
+    """Parse one strict schema-v1 synthetic request."""
 
     raw = _mapping(raw_value, path)
     _keys(
@@ -241,7 +244,26 @@ def parse_request(raw_value: Any, path: str = "request") -> TtcRequestTrace:
     )
 
 
-def write_jsonl(path: str | Path, traces: list[TtcRequestTrace]) -> None:
+AnyTtcRequestTrace: TypeAlias = TtcRequestTrace | TtcRequestTraceV2
+
+
+def parse_request(raw_value: Any, path: str = "request") -> AnyTtcRequestTrace:
+    """Dispatch one strict request object to its versioned parser."""
+
+    raw = _mapping(raw_value, path)
+    if "trace_schema_version" not in raw:
+        raise WorkloadTraceError(f"{path} is missing fields: trace_schema_version")
+    version = raw["trace_schema_version"]
+    if isinstance(version, bool) or not isinstance(version, int):
+        raise WorkloadTraceError(f"{path}.trace_schema_version must be an integer")
+    if version == TRACE_SCHEMA_VERSION:
+        return _parse_request_v1(raw, path)
+    if version == TRACE_SCHEMA_VERSION_V2:
+        return parse_request_v2(raw, path)
+    raise WorkloadTraceError(f"unsupported trace schema version {version!r}")
+
+
+def write_jsonl(path: str | Path, traces: list[AnyTtcRequestTrace]) -> None:
     """Atomically write deterministic compact JSONL in request order."""
 
     if not traces:
@@ -249,6 +271,9 @@ def write_jsonl(path: str | Path, traces: list[TtcRequestTrace]) -> None:
     request_ids = [trace.request_id for trace in traces]
     if len(set(request_ids)) != len(request_ids):
         raise WorkloadTraceError("request IDs must be unique within a trace file")
+    versions = {trace.trace_schema_version for trace in traces}
+    if len(versions) != 1:
+        raise WorkloadTraceError("one trace file must not mix schema versions")
 
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -270,7 +295,7 @@ def write_jsonl(path: str | Path, traces: list[TtcRequestTrace]) -> None:
         raise WorkloadTraceError(f"cannot write trace file {destination}: {error}") from error
 
 
-def read_jsonl(path: str | Path) -> list[TtcRequestTrace]:
+def read_jsonl(path: str | Path) -> list[AnyTtcRequestTrace]:
     """Read and validate a complete JSONL trace collection."""
 
     source = Path(path)
@@ -281,7 +306,7 @@ def read_jsonl(path: str | Path) -> list[TtcRequestTrace]:
     if not lines:
         raise WorkloadTraceError(f"trace file {source} is empty")
 
-    traces: list[TtcRequestTrace] = []
+    traces: list[AnyTtcRequestTrace] = []
     for line_number, line in enumerate(lines, start=1):
         if not line.strip():
             raise WorkloadTraceError(f"trace file {source} has blank line {line_number}")
@@ -296,6 +321,9 @@ def read_jsonl(path: str | Path) -> list[TtcRequestTrace]:
     request_ids = [trace.request_id for trace in traces]
     if len(set(request_ids)) != len(request_ids):
         raise WorkloadTraceError(f"trace file {source} contains duplicate request IDs")
+    versions = {trace.trace_schema_version for trace in traces}
+    if len(versions) != 1:
+        raise WorkloadTraceError(f"trace file {source} mixes schema versions")
     return traces
 
 

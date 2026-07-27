@@ -12,9 +12,9 @@ files, tests, and raw result manifests.
 |---|---|---|---|
 | M0 | Environment and source freeze | Complete | `uv.lock`, `.python-version`, `third_party.lock` |
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
-| M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2A complete) | 64 tests; native PIM smoke; paper-facing schema v2/real traces pending |
+| M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4A complete) | 121 tests; contracts/parsers/accounting complete; launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.1 complete) | 135 tests; trace schema/contracts/accounting complete; collectors/launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -481,9 +481,9 @@ the command path only; it is not an evaluation throughput point.
 
 ### Remaining M2 Work
 
-1. Implement schema v2, then instrument the frozen compute-optimal-TTS and
-   LLaVA-CoT pipelines to collect exact-token/KV MATH500, LiveCodeBench, and
-   MathVista traces; schema v1 remains synthetic-only.
+1. Use schema v2 to instrument the frozen compute-optimal-TTS and LLaVA-CoT
+   pipelines and collect exact-token/KV MATH500, LiveCodeBench, and MathVista
+   traces; schema v1 remains synthetic-only.
 2. Resolve the exact paper policy/PRM checkpoint and tokenizer revisions,
    including the custom tuned PRMs.
 3. Build the `paper_method` AttAcc-style AGX Orin profile; optionally run AGX
@@ -832,13 +832,96 @@ matrix, artifact contract, and implementation order are frozen in
 `docs/trace-collection-plan.md`. The planned collector commands do not exist
 yet; this checkpoint is design evidence, not a completed real-trace milestone.
 
+### M4B.1 Implementation Checkpoint: Exact Trace Schema V2
+
+#### Scope
+
+This checkpoint implements the paper-facing representation required before a
+real model pipeline can be instrumented. It does not collect MATH500,
+LiveCodeBench, or MathVista data and does not claim an evaluation result. Schema
+v1 remains available to the existing simulator as a synthetic-only contract;
+schema v2 is a separate type so exact evidence is not forced into v1's
+single-winner assumptions.
+
+#### Implementation Sequence
+
+1. Added `TokenTensorTrace`, which stores the exact submitted token IDs,
+   attention mask, and model-visible token count. Text tensors require the model
+   count to equal valid IDs; vision tensors can explicitly include expanded
+   image positions.
+2. Added `CandidateTraceV2` with exact generated token IDs, a request-global
+   logical ready order, separate output-KV materialization, reused KV count,
+   parent candidate, and terminal KV block.
+3. Added append-only `KvBlockTraceV2` lineages. The validator derives lineage
+   totals, rejects cycles/orphans/extra owner blocks, and checks each candidate's
+   extension against actual input plus materialized output positions.
+4. Separated `search_width` from `beam_size`. Each retained parent generates one
+   width-sized child set, while all selected beams remain legal next-step
+   parents.
+5. Added scalar-PRM and pairwise-judge calls. Scalar calls retain exact score
+   vectors; pairwise calls retain exact judge input/output tokens and may not
+   fabricate scalar scores.
+6. Added ordered selection events with considered/selected/pruned/live IDs and
+   the full retained-KV set after each event. Pairwise events must follow the
+   recorded judge winner.
+7. Added strict version-dispatched JSONL I/O. Files cannot mix schema versions,
+   v1 rejects collected provenance, and CLI summaries report schema/beam values.
+8. Added deterministic v1-to-v2 migration only for synthetic fixtures. Its token
+   IDs are explicit placeholders, provenance remains synthetic, and it cannot be
+   used as evaluation evidence.
+
+#### Core Invariants
+
+```text
+valid_token_count = sum(attention_mask)
+generated_tokens = len(generated_token_ids)
+parent_lineage_tokens = reused_kv_tokens
+terminal_lineage_tokens = model_input_tokens + materialized_output_tokens
+KV_extension = terminal_lineage_tokens - parent_lineage_tokens
+
+children_per_selected_parent = search_width
+final_live_candidates = selected_candidate_ids
+count(final_live_candidates) <= beam_size
+retained_KV = union(lineage(candidate) for candidate in final_live_candidates)
+```
+
+Token-ready indices are contiguous for the request and later steps cannot
+precede earlier generation steps. Character length, whitespace splitting, and
+decoded-text re-tokenization are absent from the schema and rejected as unknown
+candidate fields.
+
+#### Paper Correspondence
+
+| Implemented evidence | Paper use |
+|---|---|
+| Exact policy/verifier token tensors | Sec. 2.2 TTC generation and verification sizes |
+| Width per parent and retained beam list | Sec. 3.1 variable candidate parallelism |
+| Parent and KV block lineage | Sec. 3.2 dependency and Technique 3 memory lifetime |
+| Layer-named scalar PRM calls | Technique 2 layer-10 prediction/final verification input |
+| Request-global token-ready order | Technique 2B pre-verification trigger order |
+| Ordered pairwise loser pruning | LLaVA-CoT width-2/4 vision trace and KV release point |
+
+#### Verification
+
+Fourteen new focused tests cover exact-token byte-stable round trips, CLI v2
+inspection, width 4 with non-first winners, two retained parents expanded in the
+next step, `beam_size=3`, generated/output-KV count differences, broken parent
+prefixes, incorrect KV extension sizes, retained pruned blocks, cross-step token
+ordering, pairwise elimination/winner consistency, character-count rejection,
+v1 collected rejection, synthetic migration, and mixed-version file rejection.
+
+The next implementation checkpoint is host probing plus collection manifests,
+followed by the compute-optimal-TTS event sink. Until that sink runs on a visible
+GPU, the repository still has no real workload trace.
+
 ## Change Log
 
 | Date | Milestone | Change |
 |---|---|---|
 | 2026-07-27 | M0 | Froze environment and upstream source revisions; documented AttAcc's Ramulator2 revision override. |
 | 2026-07-27 | M1 | Added strict provenance-aware hardware contracts, corrected the PIM channel mapping, verified AGX Orin specifications, added bootstrap audit, and passed 14 tests. |
-| 2026-07-27 | M2A | Added deterministic TTC traces, six model profiles, operator/timing primitives, a generic event timeline, reversible PIM mapping, and native AttAcc smoke execution; 64 tests pass, while real traces and GPU calibration remain pending. |
+| 2026-07-27 | M2A | Added deterministic TTC traces, six model profiles, operator/timing primitives, a generic event timeline, reversible PIM mapping, and native AttAcc smoke execution; 64 tests pass, while real traces and optional Orin calibration remain pending. |
 | 2026-07-27 | M3 | Implemented T1A/T1B scheduling, history-aligned prediction, speculative rollback, pipelined verification, fragmentation-aware memory structuring, and request-level replay; 105 tests pass, while calibrated evaluation remains pending. |
 | 2026-07-27 | M4A | Added paper baseline definitions, fairness fingerprints, strict AttAcc/Duplex/ORCHES adapters, and unit-explicit energy/area/utilization accounting; 121 tests pass, while executable launchers and calibration remain pending. |
 | 2026-07-27 | M4B design | Audited AttAcc/Duplex GPU models and both workload sources; separated paper-method timing from optional Orin calibration and froze the 5070 Ti/server trace-collection plan. |
+| 2026-07-27 | M4B.1 | Implemented schema v2 exact-token tensors, logical KV lineage, multi-beam selection, scalar/pairwise verifiers, strict versioned I/O, and synthetic-only migration; 135 tests pass. |
