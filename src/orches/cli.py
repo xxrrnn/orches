@@ -11,9 +11,12 @@ from typing import Mapping, Sequence
 from .collectors import (
     CollectionStatus,
     PolicyGenerationEvent,
+    build_policy_collection,
     build_policy_request_from_events,
     policy_event_sha256,
+    probe_trace_host,
     read_policy_events,
+    write_trace_host_probe,
 )
 from .config import load_hardware_config
 from .errors import ConfigurationError, OrchesInputError, SimulationError
@@ -106,6 +109,37 @@ def _parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print a machine-readable event summary.",
+    )
+
+    probe_host = commands.add_parser(
+        "probe-trace-host",
+        help="Record the GPU/Python runtime used for trace collection.",
+    )
+    probe_host.add_argument(
+        "--output",
+        type=Path,
+        required=True,
+        help="Destination host-probe JSON file.",
+    )
+    probe_host.add_argument(
+        "--json",
+        action="store_true",
+        help="Also print the machine-readable probe.",
+    )
+
+    build_collection = commands.add_parser(
+        "build-policy-collection",
+        help="Build a trace, manifest, and report from terminal policy events.",
+    )
+    build_collection.add_argument(
+        "config",
+        type=Path,
+        help="Strict policy collection build JSON file.",
+    )
+    build_collection.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the machine-readable collection report.",
     )
 
     validate_model = commands.add_parser(
@@ -249,7 +283,12 @@ def _policy_trace_summary(
     }
     if manifest_path is not None:
         manifest = read_policy_manifest(manifest_path)
-        validate_policy_manifest(manifest, path, traces=traces)
+        validate_policy_manifest(
+            manifest,
+            path,
+            traces=traces,
+            artifact_root=manifest_path.parent,
+        )
         summary["manifest"] = str(manifest_path)
         summary["manifest_valid"] = True
         summary["missing_evidence"] = list(manifest.missing_evidence)
@@ -344,6 +383,25 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(summary, indent=2, sort_keys=True))
             else:
                 _print_mapping_summary("valid policy events", summary)
+            return 0
+        if args.command == "probe-trace-host":
+            probe = probe_trace_host()
+            write_trace_host_probe(args.output, probe)
+            summary = {"output": str(args.output), **probe.to_dict()}
+            if args.json:
+                print(json.dumps(summary, indent=2, sort_keys=True))
+            else:
+                _print_mapping_summary("trace host probe complete", summary)
+            return 0
+        if args.command == "build-policy-collection":
+            result = build_policy_collection(args.config)
+            if args.json:
+                print(json.dumps(result.report, indent=2, sort_keys=True))
+            else:
+                _print_mapping_summary(
+                    "policy collection complete",
+                    result.report,
+                )
             return 0
         if args.command == "validate-model-config":
             summary = load_transformer_config(args.path).summary()

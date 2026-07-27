@@ -10,6 +10,21 @@ from .compute_optimal_tts import (
     VllmSnapshotAccumulator,
     create_compute_optimal_tts_session,
 )
+from .host_probe import (
+    TRACE_HOST_PROBE_SCHEMA_VERSION,
+    TraceHostProbe,
+    parse_trace_host_probe,
+    probe_trace_host,
+    read_trace_host_probe,
+    write_trace_host_probe,
+)
+from .policy_collection import (
+    POLICY_COLLECTION_BUILD_SCHEMA_VERSION,
+    POLICY_COLLECTION_REPORT_SCHEMA_VERSION,
+    PolicyCollectionBuildConfig,
+    PolicyCollectionBuildResult,
+    build_policy_collection,
+)
 from .policy_events import (
     POLICY_EVENT_SCHEMA_VERSION,
     CollectionStatus,
@@ -26,22 +41,33 @@ from .policy_events import (
 
 __all__ = [
     "POLICY_EVENT_SCHEMA_VERSION",
+    "POLICY_COLLECTION_BUILD_SCHEMA_VERSION",
+    "POLICY_COLLECTION_REPORT_SCHEMA_VERSION",
+    "TRACE_HOST_PROBE_SCHEMA_VERSION",
     "CollectionStatus",
     "COLLECTOR_CONFIG_SCHEMA_VERSION",
     "COMPUTE_OPTIMAL_TTS_REVISION",
     "ComputeOptimalTtsAdapter",
     "ComputeOptimalTtsCollectorConfig",
     "ComputeOptimalTtsSession",
+    "PolicyCollectionBuildConfig",
+    "PolicyCollectionBuildResult",
     "PolicyGenerationEvent",
     "PolicyGenerationOutput",
     "PolicyRequestFinishedEvent",
     "PolicyRequestStartedEvent",
     "PolicySelectionEvent",
+    "TraceHostProbe",
     "VllmOutputSnapshot",
     "VllmSnapshotAccumulator",
     "build_policy_request_from_events",
+    "build_policy_collection",
     "create_compute_optimal_tts_session",
     "policy_event_sha256",
+    "parse_trace_host_probe",
+    "probe_trace_host",
     "read_policy_events",
+    "read_trace_host_probe",
     "write_policy_events",
+    "write_trace_host_probe",
 ]

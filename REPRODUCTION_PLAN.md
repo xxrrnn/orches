@@ -257,6 +257,8 @@ T1/T2/T3。policy contract 支持 single-step、synthetic selector 和绑定原�
 opaque selector。raw event、vLLM exact-token snapshot、event-to-trace conversion 和上游 worker
 patch 已实现；accepted action 绑定、candidate ID 树上传递、PRM 驱动的实际 global beam selection
 以及 success/failed/OOM 终止写盘也已经接通，支持论文 `num_sequence=1` 配置。当前仍未在 GPU 上运行，
+host probe、同一 cell 一致性校验以及 event directory 到 policy trace/manifest/status report 的确定性
+收口也已实现；failed/OOM 会保留而不会进入成功 trace。当前仍没有兼容 5070 Ti 的冻结 trace UV lock，
 也没有 PRM token/score trace，因此目前没有 evaluation trace，不能产出论文数值对齐结论。
 
 实现：

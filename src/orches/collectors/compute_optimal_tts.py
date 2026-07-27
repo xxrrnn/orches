@@ -305,7 +305,10 @@ class ComputeOptimalTtsCollectorConfig:
                 detail.append("unknown: " + ", ".join(unknown))
             raise WorkloadTraceError("collector config fields " + "; ".join(detail))
         version = raw["config_schema_version"]
-        if version != COLLECTOR_CONFIG_SCHEMA_VERSION:
+        if (
+            isinstance(version, bool)
+            or version != COLLECTOR_CONFIG_SCHEMA_VERSION
+        ):
             raise WorkloadTraceError(
                 f"unsupported collector config schema version {version!r}"
             )

@@ -345,11 +345,12 @@ UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-trace artifacts/traces/
 ```
 
 `validate-policy-trace`, strict manifest binding, raw policy events,
-`validate-policy-events`, exact-token worker capture, accepted-action IDs, and
-the complete search-tree selection hook are implemented through M4B.4B. The
-patched launchers require a UV-provided Python executable and do not activate
-Conda. Host probing, local/server UV trace locks, event-set conversion into one
-trace/manifest, and both complete collection commands remain design targets.
+`validate-policy-events`, exact-token worker capture, accepted-action IDs, the
+complete search-tree selection hook, `probe-trace-host`, and deterministic
+event-set conversion are implemented through M4B.5A. The patched launchers
+require a UV-provided Python executable and do not activate Conda. Local/server
+UV trace locks, the upstream-run wrapper, and vision collection remain design
+targets.
 
 ## Artifact Contract
 
@@ -375,13 +376,13 @@ a documented determinism result.
    multi-selection semantics, and synthetic-only v1 migration.
 2. [Complete] Replay schema v2 with per-token generation, multi-parent KV,
    exact selection-verifier work, and ordered physical pruning.
-3. [Partial] Add the collection manifest contract and validation; host probing
-   remains.
+3. [Complete for generation-only collection] Add the manifest contract, strict
+   host probing, UV-lock/raw-artifact binding, validation, and per-status report.
 4. [Complete for generation-only `num_sequence=1`] Implement raw text events,
    vLLM token capture, accepted-action IDs, complete-tree selection, terminal
    failure/OOM retention, and per-request event-to-trace validation.
-5. Add host probing, freeze separate 5070/server UV locks, and convert a raw
-   event set into one policy trace, manifest, and validation report.
+5. Freeze separate 5070/server UV locks and add an upstream-run wrapper that
+   records the exact invocation in the build config.
 6. Run and repeat-hash the 5070 Ti smallest-pair generation-only pilot.
 7. Implement layer-10/final PRM scoring with architecture-specific tests and
    enrich the validated pilot into complete TTC v2.

@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4B.4B complete) | 164 tests; generation-only text collector/control flow complete; UV trace lock, real run, PRM evidence, and experiment launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.5A complete) | 171 tests; generation event collection/closure complete; compatible UV trace lock, real run, PRM evidence, and experiment launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -1351,6 +1351,127 @@ separate historical server lock, convert a directory of terminal event files
 into one Policy-v1 trace/manifest/report, and run a repeat-hash width-2 pilot.
 PRM layer instrumentation remains after that pilot, per the requested order.
 
+### M4B.5A Implementation Checkpoint: Host Evidence and Collection Closure
+
+#### Scope
+
+This checkpoint closes the gap between per-request terminal raw events and the
+three durable artifacts needed for a generation-only experiment cell: canonical
+Policy-v1 trace, reproducibility manifest, and per-request validation report.
+It also records the runtime identity from the same UV interpreter that will run
+torch/vLLM. It does not install a GPU stack, run a model, or add PRM internals.
+
+#### Implementation Sequence
+
+1. Added `TraceHostProbe` with strict, versioned JSON I/O. It records the exact
+   Python executable/version/platform, torch version, torch CUDA version,
+   torch-visible accelerator names/count, driver-visible accelerator names,
+   NVIDIA driver, and BF16 capability.
+2. Added `orches probe-trace-host`. GPU packages are imported only inside the
+   probe, so the dependency-light ORCHES artifact tools remain usable without
+   torch. `nvidia-smi` is invoked with structured query fields and a timeout;
+   missing tools, CUDA visibility, or torch become explicit warnings.
+3. Defined `collection_ready` from observed runtime evidence: at least one GPU
+   must be visible to torch and torch, CUDA, and NVIDIA driver identities must
+   all be present. Seeing a card only through `nvidia-smi` is insufficient.
+4. Added strict `PolicyCollectionBuildConfig`. All paths resolve relative to
+   the config; the exact upstream collection command is an argument array, not
+   a shell string. Trace, manifest, and report outputs must be distinct and
+   outside the immutable raw-event directory.
+5. Added `build_policy_collection` and `orches build-policy-collection`.
+   Terminal event files are recursively discovered, strictly parsed, assigned
+   unique request IDs, then sorted by request ID so filesystem enumeration
+   cannot change trace bytes.
+6. Enforced one collection-cell fingerprint across success, failed, and OOM
+   requests: dataset, modality, width, beam, seed, dtype, sampling, collection
+   mode, and all source/model/tokenizer/engine/selector revisions must match.
+7. Enforced runtime precision evidence. A cell declaring `bf16`/`bfloat16` is
+   rejected unless the trace-host torch runtime reports BF16 support.
+8. Converted only successful streams into policy traces. Failed and OOM rows
+   retain event hash, generated call/candidate/token totals, and terminal error
+   in the validation report; all raw events remain manifest artifacts. An
+   all-failed cell writes `collection_buildable=false` but no empty trace or
+   misleading manifest.
+9. Made collection artifacts relocatable. Event files, host probe, build
+   config, and exact UV lock are stored as paths relative to the manifest and
+   rehashed from that root during validation. `uv_lock_sha256` must agree with
+   the retained `uv_lock` artifact when present.
+10. Added byte-stable rebuild behavior. Re-running closure over unchanged raw
+    events/config/host/lock emits identical trace, manifest, and report bytes.
+
+#### Artifact And Failure Contract
+
+```text
+terminal event directory
+  success -> validated PolicyRequestTrace row
+  failed  -> report row + hashed raw artifact only
+  OOM     -> report row + hashed raw artifact only
+
+trace.policy.jsonl
+  only validated success rows, deterministic request order
+
+manifest.json
+  trace hash + request order + source/collector identity + command
+  + runtime + UV lock hash + relative event/host/config/lock artifacts
+
+validation.json
+  every terminal request and status, including zero-success cells
+```
+
+The closure command does not infer provenance from installed package names.
+Model and source identities come from each `request_started` event; runtime
+identity comes from the host probe; dependency identity comes from the exact
+UV lock bytes. These three sources must remain distinct.
+
+#### Local Probe Evidence
+
+The root ORCHES UV interpreter was probed in this workspace. `nvidia-smi`
+reports:
+
+```text
+driver accelerator: NVIDIA GeForce RTX 5070 Ti
+driver version:     610.74
+platform:           WSL2 Linux
+```
+
+The root lock intentionally has no torch dependency. The probe therefore
+reports `torch_version=not-installed`, zero torch-visible accelerators,
+`bf16_supported=false`, and `collection_ready=false`. This is correct: the root
+environment can build and validate artifacts but must not run the model
+collector. No real model trace was obtained by this probe.
+
+#### Paper Correspondence
+
+| M4B.5A evidence | Paper relationship |
+|---|---|
+| Same-interpreter GPU/torch/CUDA/driver probe | Sec. 5.1 reproducible workload runtime identity |
+| One strict configuration fingerprint per cell | Fig. 11 width/model/BW matrix isolation prerequisite |
+| Deterministic successful request order and hashes | Repeatable workload input for all baselines |
+| Failed/OOM rows outside successful trace | Fair baseline matrix accounting without survivorship bias |
+| Exact UV lock retained and hashed | Software stack provenance for local/server trace comparison |
+| BF16 capability check | Prevents declared precision from differing from executed precision |
+
+#### Verification
+
+Seven new tests cover strict host-probe round trip/unknown-field rejection,
+success-plus-OOM closure, relative artifact revalidation, exact status counts,
+byte-stable repeated builds, mixed-width cell rejection, BF16 capability
+rejection, all-failed report/no-empty-trace behavior, and the checked example
+build config. Existing manifest tests continue to pass with absolute artifacts.
+
+The full repository suite passes 171 tests. `compileall`, `git diff --check`,
+combined upstream patch `--check`, and the clean third-party worktree audit also
+pass.
+
+#### Current Boundary And Next Milestone
+
+All repository-side code needed to capture and close a generation-only text
+pilot is present. What is missing is the GPU runtime itself: M4B.5B must create
+and freeze a 5070 Ti-compatible UV project, separately retain the historical
+server/paper stack, run the host probe from that interpreter, and execute the
+smallest width-2 model pair twice. Only matching repeat evidence can become the
+first real policy trace. PRM layer/tensor enrichment remains after this pilot.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -1366,3 +1487,4 @@ PRM layer instrumentation remains after that pilot, per the requested order.
 | 2026-07-27 | M4B.3 | Added a separately versioned generation-only policy trace, exact call/RNG/token/KV semantics, opaque/synthetic selection modes, reproducibility manifests, and strict CLI validation; 149 tests pass, while no real trace has yet been collected. |
 | 2026-07-27 | M4B.4A | Added strict raw policy events, deterministic event-to-trace conversion, vLLM snapshot/token/KV evidence, a sanitized compute-optimal-TTS adapter, and an audited external worker patch; 159 tests pass, while the search-tree selection hook and real run remain pending. |
 | 2026-07-27 | M4B.4B | Added per-request collector sessions/config, stable candidate IDs through accepted actions and search nodes, actual global selection capture, success/OOM validation, ordered external patches, and UV-only upstream launch boundaries; 164 tests pass, while the first GPU event stream and PRM enrichment remain pending. |
+| 2026-07-27 | M4B.5A | Added strict GPU/torch/CUDA host probing, deterministic terminal-event closure, same-cell/BF16 enforcement, relocatable raw/config/UV-lock manifest binding, and complete success/failed/OOM reports; 171 tests pass, while the compatible trace UV lock and first GPU model run remain pending. |

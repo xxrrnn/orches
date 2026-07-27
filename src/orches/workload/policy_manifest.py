@@ -198,6 +198,7 @@ def build_policy_manifest(
     runtime: PolicyRuntimeEnvironment,
     raw_artifacts: tuple[PolicyArtifactDigest, ...],
     trace_file: str | None = None,
+    artifact_root: str | Path | None = None,
 ) -> PolicyTraceManifest:
     """Build and cross-check a manifest for already serialized trace bytes."""
 
@@ -234,7 +235,12 @@ def build_policy_manifest(
         runtime=runtime,
         raw_artifacts=raw_artifacts,
     )
-    validate_policy_manifest(manifest, trace_path, traces=traces)
+    validate_policy_manifest(
+        manifest,
+        trace_path,
+        traces=traces,
+        artifact_root=artifact_root,
+    )
     return manifest
 
 
@@ -282,6 +288,15 @@ def validate_policy_manifest(
         )
 
     artifact_hashes = {artifact.sha256 for artifact in manifest.raw_artifacts}
+    uv_lock_hashes = {
+        artifact.sha256
+        for artifact in manifest.raw_artifacts
+        if artifact.role == "uv_lock"
+    }
+    if uv_lock_hashes and uv_lock_hashes != {manifest.uv_lock_sha256}:
+        raise WorkloadTraceError(
+            "policy manifest UV lock artifact does not match uv_lock_sha256"
+        )
     decision_hashes = {
         step.selection.decision_artifact_sha256
         for trace in loaded

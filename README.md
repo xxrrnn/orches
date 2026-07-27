@@ -87,6 +87,20 @@ external UV interpreter instead of activating Conda. No GPU collection has run
 in this workspace; see `integrations/compute-optimal-tts/README.md` for the
 configuration, pilot command, and remaining evidence boundary.
 
+Probe the actual trace UV interpreter, then close a directory of terminal event
+files into one trace, manifest, and status report:
+
+```bash
+uv run --project /path/to/trace-text-project --frozen python -m orches.cli \
+  probe-trace-host --output artifacts/manifests/text-pilot.host.json --json
+uv run --frozen orches build-policy-collection \
+  configs/workloads/compute_optimal_tts_build.json --json
+```
+
+`build-policy-collection` includes successful requests in the trace and retains
+failed/OOM requests in the report and hashed raw artifacts. It rejects mixed
+model/width/seed cells and a BF16 run whose host probe lacks BF16 support.
+
 Validate a frozen model architecture and run the native PIM smoke benchmark:
 
 ```bash

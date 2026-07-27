@@ -121,7 +121,15 @@ traces.
 ## Pilot Procedure
 
 After filling the collector config and launching the patched vLLM/PRM services,
-run upstream with the paper-compatible settings:
+capture the host identity using the same frozen UV interpreter:
+
+```bash
+"${ORCHES_PYTHON_EXECUTABLE}" -m orches.cli probe-trace-host \
+  --output artifacts/manifests/compute-optimal-tts-pilot.host.json --json
+```
+
+`collection_ready` must be true. For a BF16 cell, `bf16_supported` must also be
+true. Then run upstream with the paper-compatible settings:
 
 ```bash
 cd third_party/compute-optimal-tts/src
@@ -147,12 +155,24 @@ uv run --frozen orches validate-policy-events \
 
 Repeat the same request set with the same immutable revisions and seed. Exact
 event hashes should be compared before local and server traces are pooled.
+After every request has a terminal event, fill
+`configs/workloads/compute_optimal_tts_build.json` from its example and run:
+
+```bash
+uv run --frozen orches build-policy-collection \
+  configs/workloads/compute_optimal_tts_build.json --json
+```
+
+This command writes the generation-only trace, reproducibility manifest, and
+per-request validation report. It hashes successful, failed, and OOM events,
+the host probe, build config, and exact trace UV lock. A cell with no successful
+request writes a failure report but no empty trace or manifest.
 
 ## Remaining Work
 
-No GPU run has been performed in this workspace, so the repository still has
-no real policy trace. The next collection checkpoint must run the width-2
-pilot, convert successful event files into one policy trace plus manifest, and
-record deterministic repeat hashes. PRM tensor/score instrumentation remains a
-separate later milestone and is required before full paper latency or energy
-claims.
+No GPU model run has been performed in this workspace, so the repository still
+has no real policy trace. Host probing and event-set conversion are implemented;
+the next checkpoint must freeze the 5070-compatible trace UV lock, run the
+width-2 pilot, and record deterministic repeat hashes. PRM tensor/score
+instrumentation remains a separate later milestone and is required before full
+paper latency or energy claims.

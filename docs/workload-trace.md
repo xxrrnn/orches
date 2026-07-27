@@ -65,6 +65,14 @@ request is rebuilt through the strict Policy-v1 validator before write; failed
 and OOM streams remain raw-only evidence. The integration is executable for
 the paper's `num_sequence=1` mode, but no GPU trace has been collected yet.
 
+`build-policy-collection` closes a terminal event directory into a canonical
+Policy-v1 JSONL, manifest, and request-status report. One cell must have one
+dataset/model/tokenizer/engine/selector, width, beam, seed, dtype, and sampling
+configuration. Successes enter the trace; failed/OOM requests stay in the
+report and manifest's hashed raw artifacts. The manifest also binds the host
+probe, build config, and exact UV lock. Relative artifact paths are validated
+from the manifest directory so a complete artifact tree can be relocated.
+
 Both versions exclude prompt text, generated text, reference answers, and
 correctness. Correctness belongs in a separate evaluation record keyed by
 `request_id` and `dataset_id`.

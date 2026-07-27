@@ -1,0 +1,29 @@
+{
+  "build_schema_version": 1,
+  "event_dir": "../../artifacts/raw/compute-optimal-tts-pilot",
+  "trace_path": "../../artifacts/traces/compute-optimal-tts-pilot.policy.jsonl",
+  "manifest_path": "../../artifacts/manifests/compute-optimal-tts-pilot.manifest.json",
+  "report_path": "../../artifacts/reports/compute-optimal-tts-pilot.validation.json",
+  "uv_lock_path": "REPLACE_WITH_TRACE_UV_LOCK",
+  "host_probe_path": "../../artifacts/manifests/compute-optimal-tts-pilot.host.json",
+  "collection_command": [
+    "bash",
+    "scripts/run.sh",
+    "--LM",
+    "Qwen/Qwen2.5-1.5B-Instruct",
+    "--RM",
+    "REPLACE_WITH_PRM_MODEL",
+    "--task",
+    "MATH",
+    "--method",
+    "beam_search",
+    "--width",
+    "2",
+    "--num_seq",
+    "1",
+    "--num_q",
+    "3",
+    "--bs",
+    "3"
+  ]
+}
