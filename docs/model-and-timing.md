@@ -55,6 +55,9 @@ T = max(FLOPs / effective_FLOP_per_s, bytes / effective_byte_per_s)
 The SoC sensitivity profile scales only memory byte/s. It does not change
 compute throughput or fixed overhead.
 
-No evaluation-ready AGX Orin rate profile is committed yet. Official peak
-specifications are bounds; current hardware does not expose an Orin GPU for
-calibration.
+No `orin_calibrated` AGX Orin rate profile is committed yet. The main
+paper-method reproduction may use an AttAcc-style analytical profile whose peak
+and utilization provenance remains explicit. Official peak specifications are
+bounds, not achieved measurements. The two evidence profiles and the reason a
+5070 Ti workload trace does not supply Orin timing are defined in
+`calibration.md` and `trace-collection-plan.md`.

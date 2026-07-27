@@ -12,7 +12,7 @@ files, tests, and raw result manifests.
 |---|---|---|---|
 | M0 | Environment and source freeze | Complete | `uv.lock`, `.python-version`, `third_party.lock` |
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
-| M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2A complete) | 64 tests; native PIM smoke; real traces/GPU calibration pending |
+| M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2A complete) | 64 tests; native PIM smoke; paper-facing schema v2/real traces pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
 | M4 | Baselines, energy, area, utilization | In progress (M4A complete) | 121 tests; contracts/parsers/accounting complete; launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
@@ -341,19 +341,21 @@ are carried into manifests and later sensitivity analysis.
 ### Next Milestone
 
 M2 will define the versioned TTC workload trace schema, add a deterministic
-synthetic trace generator for simulator development, and implement calibrated
-GPU/PIM primitive models. It will map GPU timing to Eq. (1), PIM timing to
-Eq. (2)-(3), and preserve measured versus assumed parameters separately.
+synthetic trace generator for simulator development, and implement analytical
+or calibrated GPU/PIM primitive models. It will map GPU timing to Eq. (1), PIM
+timing to Eq. (2)-(3), and preserve inherited, measured, and assumed parameters
+separately.
 
 ## M2A: Trace, Model, Timing, and Native PIM Foundation
 
 ### Checkpoint Scope
 
-M2 spans Phase 2-4 and is not complete yet. This checkpoint implements the
-replayable workload contract, Transformer shapes/operator expansion, unit-safe
+M2 spans Phase 2-4 and is not complete yet. This checkpoint implements a
+synthetic replay contract, Transformer shapes/operator expansion, unit-safe
 analytical timing equations, reversible PIM addressing, and a native AttAcc
-smoke path. Real paper workload collection, AGX Orin calibration, full GPU
-baseline execution, and calibrated PIM primitive sweeps remain open.
+smoke path. Paper-facing schema v2 and real workload collection, the optional
+AGX Orin calibration profile, full GPU baseline execution, and calibrated PIM
+primitive sweeps remain open.
 
 ### Implementation Sequence
 
@@ -392,6 +394,11 @@ next.parent = current.selected_candidate
 next.shared_KV = current.shared_KV + selected.unique_KV
 unique_KV = generated_tokens                  # schema v1
 ```
+
+These are synthetic v1 invariants only. They do not claim that output
+characters equal tokens or that generated tokens always equal materialized KV.
+Paper-facing schema v2 must use exact model token IDs/masks, actual KV
+materialization, ordered selection lineage, and multiple retained beams.
 
 Prompt, completion, answer, and correctness bodies are intentionally excluded.
 Correctness will be a separate record keyed by request and dataset IDs.
@@ -474,12 +481,14 @@ the command path only; it is not an evaluation throughput point.
 
 ### Remaining M2 Work
 
-1. Instrument the frozen compute-optimal-TTS and LLaVA-o1 pipelines to collect
-   real MATH500/LiveCodeBench/MathVista schema-v1 traces.
+1. Implement schema v2, then instrument the frozen compute-optimal-TTS and
+   LLaVA-CoT pipelines to collect exact-token/KV MATH500, LiveCodeBench, and
+   MathVista traces; schema v1 remains synthetic-only.
 2. Resolve the exact paper policy/PRM checkpoint and tokenizer revisions,
    including the custom tuned PRMs.
-3. Run AGX Orin GEMM/GEMV/attention/memory/launch calibration and store raw
-   measurements; the current machine has no target GPU.
+3. Build the `paper_method` AttAcc-style AGX Orin profile; optionally run AGX
+   Orin GEMM/GEMV/attention/memory/launch calibration and store raw measurements
+   as the separate `orin_calibrated` profile.
 4. Integrate the generic event timeline into an executable pure-GPU request
    baseline; the current timeline is validated but does not yet replay requests.
 5. Expand native PIM microbenchmarks for linear, shared/unique attention,
@@ -498,8 +507,9 @@ This checkpoint implements the functional behavior of Techniques 1, 2, and 3
 from Sec. 4.2-4.4 and composes them on one request-level resource timeline. It
 establishes scheduling, prediction, rollback, branch pruning, address
 translation, and compaction invariants. It does not claim the paper's numerical
-speedup, energy, area, or memory-saving results: real traces and calibrated
-GPU/PIM/controller rates remain M2/M4 prerequisites for M5 evaluation.
+speedup, energy, area, or memory-saving results: real schema-v2 traces and a
+frozen evidence profile remain M2/M4 prerequisites for M5 evaluation. The
+profile may be `paper_method`; `orin_calibrated` is optional stronger evidence.
 
 ### Implementation Sequence
 
@@ -644,10 +654,12 @@ replayer is single-use so state from one request cannot leak into another.
 
 ### Remaining Calibration and Evaluation Work
 
-1. Replace synthetic replay rates with frozen AGX Orin and native PIM
-   calibration; synthetic tests are not evaluation evidence.
-2. Collect real MATH500, LiveCodeBench, and MathVista traces with exact model and
-   tokenizer revisions.
+1. Replace synthetic replay rates with a frozen `paper_method` GPU/PIM profile;
+   add `orin_calibrated` separately when target measurements are available.
+   Synthetic tests are not evaluation evidence.
+2. Collect schema-v2 MATH500, LiveCodeBench, and MathVista traces with exact
+   model/tokenizer revisions, token IDs, KV materialization, and selection
+   lineage.
 3. Derive per-model T1 tier thresholds and T2B prefill thresholds rather than
    selecting values from final paper speedups.
 4. Calibrate cache SRAM, controller buffer, compaction bandwidth/energy, and
@@ -780,6 +792,46 @@ busy time greater than wall time.
 5. Produce one smoke comparison containing every required status and raw result
    hash before starting the paper evaluation matrix.
 
+### M4B Design Checkpoint: GPU Evidence and Real Trace Sources
+
+The Sec. 5.1 and upstream-source audit corrected an overly strict earlier
+requirement: real AGX Orin measurements are not mandatory inputs to the paper's
+simulation method. ORCHES says its simulator extends AttAcc, relies on prior
+GPU/PIM validation, and retains prior unit latency and energy. AttAcc uses a
+layer analytical model with fixed compute/memory utilization and limited A100
+fits; Duplex uses operation-level `max(FLOPs/peak, bytes/bandwidth)` timing.
+Neither consumes a measured target-workload GPU latency trace.
+
+M4B will therefore expose `paper_method` and `orin_calibrated` as separate
+profiles. The former is sufficient for a transparently labeled reproduction;
+the latter remains optional stronger validation. RTX 5070 Ti wall time will
+never be substituted for Orin timing or energy.
+
+The workload-source audit found:
+
+1. compute-optimal-TTS commit `0ee2578` supports the paper's one-parent beam
+   shape with `num_sequence=1`, exposes token counts and final PRM history, but
+   does not save the rejected tree, token-ready progress, or layer-10 scores;
+2. the frozen LLaVA-o1 checkout is only a redirect; executable vision code must
+   be pinned from LLaVA-CoT, with `8983878` selected as the closest public
+   paper-era inference commit under `A-VISION-001`;
+3. LLaVA-CoT stage beam uses four stages and pairwise model judging, so schema
+   v1's scalar PRM fields cannot faithfully represent its verifier;
+4. a 5070 Ti can develop and collect small unquantized text combinations, while
+   the 11B BF16 vision and 7B/8B PRM matrices require a larger server GPU.
+
+The trace contract was further tightened after review: all sizes come from the
+exact token IDs/masks submitted to the model, never output characters or
+re-tokenized text. Schema v2 must separate generated IDs from KV-materialized
+positions and retain ordered KV lineage. Width greater than two follows actual
+top-k or pairwise tournament decisions, including multiple surviving beams and
+the precise point at which each losing candidate becomes dead.
+
+The complete collection fields, uv environment split, local pilot, server
+matrix, artifact contract, and implementation order are frozen in
+`docs/trace-collection-plan.md`. The planned collector commands do not exist
+yet; this checkpoint is design evidence, not a completed real-trace milestone.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -789,3 +841,4 @@ busy time greater than wall time.
 | 2026-07-27 | M2A | Added deterministic TTC traces, six model profiles, operator/timing primitives, a generic event timeline, reversible PIM mapping, and native AttAcc smoke execution; 64 tests pass, while real traces and GPU calibration remain pending. |
 | 2026-07-27 | M3 | Implemented T1A/T1B scheduling, history-aligned prediction, speculative rollback, pipelined verification, fragmentation-aware memory structuring, and request-level replay; 105 tests pass, while calibrated evaluation remains pending. |
 | 2026-07-27 | M4A | Added paper baseline definitions, fairness fingerprints, strict AttAcc/Duplex/ORCHES adapters, and unit-explicit energy/area/utilization accounting; 121 tests pass, while executable launchers and calibration remain pending. |
+| 2026-07-27 | M4B design | Audited AttAcc/Duplex GPU models and both workload sources; separated paper-method timing from optional Orin calibration and froze the 5070 Ti/server trace-collection plan. |

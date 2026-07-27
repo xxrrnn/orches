@@ -41,10 +41,13 @@
 |---|---|---|
 | `PAPER` | 论文正文、公式、图或表明确给出 | 默认主实验配置 |
 | `INHERITED` | 论文声明沿用 AttAcc，值来自固定 commit | 记录上游文件和 commit |
-| `CALIBRATED` | 从 AGX Orin 或已验证实现测量得到 | 保存原始测量、拟合误差和环境 |
+| `CALIBRATED` | 从 AGX Orin 或已验证实现测量得到 | 保存原始测量、拟合误差和环境；作为独立校准 profile |
 | `ASSUMED` | 论文未披露，只能工程补全 | 不得静默使用；必须做敏感性分析 |
 
-不得为了拟合论文最终 speedup 而反向调参。先冻结公开参数和继承参数，再校准单算子，最后一次性运行系统实验。
+不得为了拟合论文最终 speedup 而反向调参。主结果分为 `paper_method` 和
+`orin_calibrated` 两个 profile：前者遵循 Sec. 5.1，使用 AttAcc 风格解析模型和继承单位开销；
+后者在目标硬件可用时增加独立校准。两者不得混合参数。完整 trace 采集方案见
+`docs/trace-collection-plan.md`。
 
 ## 3. 论文已明确的配置
 
@@ -79,7 +82,7 @@ HBM 内部 bank 带宽与 host/controller I/O 的 204.8 GB/s 必须分别建模�
 | policy models | Llama3.2-1B、Qwen2.5-1.5B、Qwen2.5-3B |
 | PRM models | Qwen2.5-1.5B-PRM-Tuned、Qwen2.5-7B-PRM-Tuned、Llama3.1-8B-PRM-Tuned |
 | model combinations | 3 x 3 = 9 |
-| search width | 2 到 8；主扫描固定为 `{2, 4, 6, 8}`，各图按论文显示取子集 |
+| search width | 2 到 8；完整扫描为所有整数 `{2, 3, 4, 5, 6, 7, 8}`，绘图时按论文坐标取子集 |
 | question difficulty | Level 1 到 Level 5，沿用 [18] 的分级数据 |
 
 ### 3.3 视觉任务
@@ -228,7 +231,8 @@ orches/
 完成标准：干净环境中一条命令可以构建；同一配置两次运行的原始结果 hash 一致。
 
 当前环境差距：`cmake` 和 `clang++` 未安装，AttAcc/Duplex 的 Ramulator2 submodule 未初始化；
-当前会话无法访问 GPU。性能模拟器开发可继续，但真实模型 trace 采集和 Orin 校准必须在有 GPU 的环境执行。
+当前会话无法访问 GPU。性能模拟器和 `paper_method` 解析 profile 的开发可继续；真实模型 trace
+需要在可见 GPU 上采集，`orin_calibrated` profile 需要另行在 AGX Orin 上测量。
 
 ### Phase 1：写硬件合同和配置校验器
 
@@ -249,8 +253,11 @@ orches/
 实现：
 
 1. 定义版本化 JSONL schema，每个 request/step 至少记录：
-   `dataset_id`、difficulty、policy/PRM、shared prompt tokens、每个 candidate 的 token 数、
-   token 生成时间线、small/large PRM 分数、最终选择、被剪枝分支、shared/unique KV 长度。
+   `dataset_id`、difficulty、policy/PRM、实际提交的 input token IDs/mask、每个 candidate 的
+   generated token IDs、逻辑 token-ready 顺序、small/large PRM 分数或 pairwise verifier calls、
+   有序 selected/pruned 集合、实际 KV materialization 和 parent/block lineage。所有长度由这些
+   token/KV 记录推导，禁止使用输出字符数或重新 tokenize 的文本。collector 的绝对 GPU wall
+   time 不进入 Orin replay。
 2. 在固定模型、tokenizer、seed、采样参数下运行文本 [18] pipeline，采集 MATH500 和
    LiveCodeBench trace。
 3. 运行视觉 [36] pipeline，额外记录 image token 数和 question-length bucket。
@@ -259,8 +266,8 @@ orches/
 
 论文对应：Sec. 2.2、Fig. 3、Sec. 3、Sec. 5.1 的 algorithm pipeline and dataset。
 
-测试：schema round-trip；selected branch 必须存在；下一 step 的 shared KV 必须由上一步选择导出；
-固定 seed 重放控制流一致。
+测试：schema round-trip；selected branch 必须存在；下一 step 的 parent/KV 必须由真实选择导出；
+width 4 非顺序胜者和 `beam_size > 1` 的多存活分支正确；固定 seed 重放控制流一致。
 
 完成标准：任一 request 可从 trace 重建完整 reasoning tree，而不需要再次调用模型。
 
@@ -271,8 +278,9 @@ orches/
 1. 支持 Llama/Qwen 的层数、hidden size、FFN、MHA/GQA、KV heads 和 FP16 数据量。
 2. 将 prefilling、decoding、linear、shared KV query、unique KV query、softmax、normalization
    展开为显式算子 DAG。
-3. GPU 时间使用 `max(compute_time, memory_time)` 加 kernel/launch/同步开销；`CC_GPU` 和有效
-   `BW_GPU` 由 Orin microbenchmark 校准，官方 peak 仅作为上界。
+3. GPU 时间使用 `max(compute_time, memory_time)` 加显式 kernel/launch/同步开销。
+   `paper_method` 使用 Sec. 5.1 所述 AttAcc 风格解析模型、论文带宽和显式继承/假设参数；
+   `orin_calibrated` 另行使用 Orin microbenchmark 拟合值。官方 peak 只能标为解析上界。
 4. 实现 100%、75%、50% SoC bandwidth profile，不同时改变 compute capability。
 5. 建立纯 GPU baseline：generation 和 verification 均在 GPU，严格遵守 step 依赖。
 

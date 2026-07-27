@@ -2,10 +2,12 @@
 
 ## Scope
 
-The version 1 JSONL trace records the control flow and tensor-relevant sizes of
-one completed TTC reasoning request. It is sufficient to replay generation,
-verification, branch selection, pruning, and KV growth without invoking a
-language model again. One JSON object represents one request.
+The version 1 JSONL trace is a development contract for deterministic synthetic
+requests. It can replay the repository's current one-parent, one-winner scalar
+PRM examples without invoking a language model again. It is not sufficient for
+paper workload collection because it does not preserve exact token IDs, actual
+KV materialization, multiple selected beams, or pairwise verifier calls. One
+JSON object represents one request.
 
 The trace deliberately excludes prompt text, generated text, reference answers,
 and correctness. Correctness belongs in a separate evaluation record keyed by
@@ -27,9 +29,9 @@ from answer grading and avoids storing unnecessary content.
 | `provenance` | Pipeline, dataset, tokenizer, policy, and PRM revisions |
 | `steps` | Ordered generation/verification decisions |
 
-Collected traces must identify the frozen compute-optimal-TTS or LLaVA-o1
-revision. Synthetic traces use `source_kind=synthetic` and are never eligible
-for paper evaluation.
+Version 1 traces must use `source_kind=synthetic` and are never eligible for
+paper evaluation. Real compute-optimal-TTS and LLaVA-CoT collection requires
+schema v2 as specified in `trace-collection-plan.md`.
 
 ## Step and Candidate Fields
 
@@ -39,8 +41,7 @@ records a request-unique ID, its parent ID, generated/unique-KV token count,
 relative per-token completion timestamps in microseconds, and both small- and
 large-PRM scores.
 
-Version 1 treats each candidate's newly generated tokens as its unique KV
-fragment:
+Version 1 makes the following synthetic-only simplification:
 
 ```text
 candidate.unique_kv_tokens = candidate.generated_tokens
@@ -54,6 +55,19 @@ next.shared_kv_tokens = current.shared_kv_tokens
 
 next.candidate.parent_candidate_id = current.selected_candidate_id
 ```
+
+These equations are v1 validation rules, not hardware facts. A real collector
+must count the exact `input_ids`/masks submitted to the model and the generated
+token IDs returned by the engine. It must record which sequence positions
+actually materialized KV and retain/free those KV blocks according to the
+ordered top-k or pairwise selection events. Character length, whitespace token
+counts, re-tokenized output text, and a fixed single-winner assumption are not
+valid substitutes.
+
+For `beam_size > 1`, schema v2 keeps every selected candidate live, records its
+parent and KV-block lineage, and maps each next expansion to the actual retained
+parent or parents. Shared KV is computed from common token ancestry; it is not
+assumed to be `prompt_tokens + sum(generated_tokens)`.
 
 ## Validation Invariants
 
@@ -69,9 +83,9 @@ reported SHA-256 are deterministic.
 
 ## Paper Mapping
 
-The request/step/candidate structure represents Sec. 2.2 and Fig. 3's TTC
-generation and verification tree. Search width and branch-dependent KV growth
-provide the inputs for Sec. 3.1 variable parallelism, Sec. 3.2 branch
-dependency, Technique 1 online compensation, Technique 2 prediction, and
-Technique 3 fragmentation. Dataset/model fields carry Sec. 5.1 evaluation
-identity.
+The v1 request/step/candidate structure is a synthetic approximation of Sec.
+2.2 and Fig. 3's TTC generation and verification tree. Schema v2 will provide
+the exact token, verifier, selection, and KV-lineage inputs required by Sec. 3.1
+variable parallelism, Sec. 3.2 branch dependency, Technique 1 online
+compensation, Technique 2 prediction, Technique 3 fragmentation, and Sec. 5.1
+paper evaluation.

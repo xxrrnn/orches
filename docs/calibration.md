@@ -1,11 +1,30 @@
 # Calibration Plan and Status
 
+## Evidence Profiles
+
+ORCHES Sec. 5.1 says that the simulator extends AttAcc, retains its unit latency
+and energy, and relies on the prior work's hardware validation. Consequently,
+target-Orin measurement is not a prerequisite for collecting workload control
+flow or for running a clearly labeled reproduction of the paper's simulation
+method.
+
+Two profiles are kept separate:
+
+| Profile | Purpose | Eligibility |
+|---|---|---|
+| `paper_method` | AttAcc-style analytical GPU model with paper bandwidth, inherited utilization, and explicit peak/assumed fields | Main paper-method reproduction with sensitivity |
+| `orin_calibrated` | Rates fitted from target AGX Orin operator measurements | Independent validation and calibrated result set |
+
+An RTX 5070 Ti may collect model-dependent traces. Its wall-clock rates and
+energy are not valid inputs to either AGX Orin profile. See
+`docs/trace-collection-plan.md`.
+
 ## Status
 
-No evaluation-ready AGX Orin calibration is available in the current
-environment. The host does not expose the target GPU. Official core count,
-frequency, and memory bandwidth remain upper bounds and must not be recorded as
-achieved rates.
+No `orin_calibrated` profile is available in the current environment. The host
+does not expose the target GPU. Official core count, frequency, and memory
+bandwidth remain upper bounds and must not be recorded as achieved rates. This
+does not block the separate `paper_method` profile.
 
 The AttAcc Ramulator2 backend is executable. M2A ran a functional all-bank MAC
 smoke test, but one mixed command sequence is insufficient to infer the
