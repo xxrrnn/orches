@@ -38,6 +38,29 @@ stack, and raw artifacts. `validate-policy-trace --manifest` validates that
 boundary. Enrichment later expands each call into TTC-v2 candidates and adds
 real verifier calls; TTC-v2 validation is not relaxed in the meantime.
 
+## Raw Policy Events
+
+`collectors/policy_events.py` is the boundary between a model pipeline and the
+generation-only policy contract. A per-request event file contains:
+
+```text
+request_started
+generation          one per root/selected-parent model call
+selection           one actual selected/pruned partition per step
+request_finished    success, failed, or OOM
+```
+
+Generation outputs carry exact IDs, logical ready order, and actual
+materialization; decoded text is rejected. Successful streams are converted
+deterministically into Policy v1, while failed/OOM streams remain raw evidence
+and cannot be presented as successful traces.
+
+The compute-optimal-TTS worker integration consumes cumulative vLLM snapshots.
+It verifies append-only IDs, waits for all requested output sequences, and
+records the terminal sampled token as not yet KV-materialized. The first
+external patch exposes these fields and the sampling seed. Candidate/legal-action
+and search-selection hooks remain required before a real trace can be emitted.
+
 Both versions exclude prompt text, generated text, reference answers, and
 correctness. Correctness belongs in a separate evaluation record keyed by
 `request_id` and `dataset_id`.

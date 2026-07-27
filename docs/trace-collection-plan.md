@@ -344,8 +344,10 @@ UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-policy-trace artifacts/
 UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-trace artifacts/traces/replay.jsonl --json
 ```
 
-`validate-policy-trace` and its strict manifest binding are implemented in
-M4B.3. Host probing and both collection commands remain design targets.
+`validate-policy-trace`, strict manifest binding, raw policy events,
+`validate-policy-events`, and the first exact-token worker patch are implemented
+through M4B.4A. Host probing, the search-tree selection hook, and both complete
+collection commands remain design targets.
 
 ## Artifact Contract
 
@@ -373,7 +375,8 @@ a documented determinism result.
    exact selection-verifier work, and ordered physical pruning.
 3. [Partial] Add the collection manifest contract and validation; host probing
    remains.
-4. Implement the text trace sink and complete-tree export.
+4. [Partial] Implement raw text events, vLLM token capture, and event-to-trace
+   conversion; accepted-action and complete-tree selection hooks remain.
 5. Implement layer-10/final PRM scoring with architecture-specific tests.
 6. Run the 5070 Ti smallest-pair pilot.
 7. Pin executable LLaVA-CoT and implement width-2/4 tournament export.

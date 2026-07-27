@@ -1,0 +1,248 @@
+diff --git a/src/reason/evaluation/evaluate.py b/src/reason/evaluation/evaluate.py
+index b608657..673a4f8 100644
+--- a/src/reason/evaluation/evaluate.py
++++ b/src/reason/evaluation/evaluate.py
+@@ -250,6 +250,7 @@ if __name__ == "__main__":
+         top_k=args.top_k,
+         top_p=args.top_p,
+         max_new_tokens=args.max_new_tokens,
++        seed=args.seed,
+     )
+     cfg_dict_record["gen_config"] = gen_config.__dict__
+ 
+@@ -275,6 +276,7 @@ if __name__ == "__main__":
+                 top_k=-1,
+                 top_p=top_p,
+                 max_new_tokens=gen_config.max_new_tokens,
++                seed=args.seed,
+             )
+         elif args.method == "best_of_n":
+             args.num_sequence = args.tree_max_width
+diff --git a/src/reason/inference/lm_call.py b/src/reason/inference/lm_call.py
+index 23b5f12..6a2d738 100644
+--- a/src/reason/inference/lm_call.py
++++ b/src/reason/inference/lm_call.py
+@@ -21,6 +21,7 @@ class LMCallingConfig:
+     stop_str: Optional[Union[str, List[str]]] = None
+     include_stop_str_in_output: bool = False
+     first_generation: bool = False
++    seed: int = 0
+ 
+ 
+ class LanguageModelCallingFunction:
+@@ -64,6 +65,7 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
+                 temperature=config.temperature,
+                 top_p=config.top_p,
+                 top_k=config.top_k,
++                seed=config.seed,
+                 max_new_tokens=config.max_new_tokens,
+                 stop_token_ids=config.stop_token_ids,
+                 stop_str=config.stop_str,
+@@ -83,6 +85,7 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
+                 temperature=config.temperature,
+                 top_p=config.top_p,
+                 top_k=config.top_k,
++                seed=config.seed,
+                 max_new_tokens=config.max_new_tokens,
+                 stop_token_ids=config.stop_token_ids,
+                 stop_str=config.stop_str,
+diff --git a/src/reason/inference/text_generation.py b/src/reason/inference/text_generation.py
+index 888a136..e170b27 100644
+--- a/src/reason/inference/text_generation.py
++++ b/src/reason/inference/text_generation.py
+@@ -4,7 +4,7 @@ This file is largely borrowed from OpenR (https://github.com/openreasoner/openr)
+ 
+ import traceback
+ from dataclasses import dataclass
+-from typing import List
++from typing import List, Optional
+ 
+ import requests
+ from transformers import AutoTokenizer
+@@ -18,6 +18,11 @@ class ConcatedLMGenResult:
+     cumulative_logprob: List[float]
+     logp_avg_by_len: List[float]
+     finish_reason: List[str]
++    worker_request_id: Optional[str] = None
++    prompt_token_ids: Optional[List[int]] = None
++    output_token_ids: Optional[List[List[int]]] = None
++    token_ready_indices: Optional[List[List[int]]] = None
++    materialized_output_tokens: Optional[List[int]] = None
+ 
+     # post init compute number of completion_tokens
+     def __post_init__(self):
+@@ -51,6 +56,7 @@ def _generate_fastchat(
+     temperature,
+     top_p,
+     top_k,
++    seed,
+     max_new_tokens,
+     stop_token_ids,
+     stop_str,
+@@ -85,6 +91,7 @@ def _generate_fastchat(
+         "n": n,
+         "top_p": top_p,
+         "top_k": top_k,
++        "seed": seed,
+         "stop_token_ids": stop_token_ids,
+         "max_new_tokens": max_new_tokens,
+         "stop": stop_str,
+@@ -109,6 +116,11 @@ def _generate_fastchat(
+         cumulative_logprob=cum_logps,
+         logp_avg_by_len=avg_len_logps,
+         finish_reason=results["finish_reason"],
++        worker_request_id=results["request_id"],
++        prompt_token_ids=results["prompt_token_ids"],
++        output_token_ids=results["output_token_ids"],
++        token_ready_indices=results["token_ready_indices"],
++        materialized_output_tokens=results["materialized_output_tokens"],
+     )
+ 
+ 
+@@ -119,6 +131,7 @@ def _generate_sgl(
+     temperature,
+     top_p,
+     top_k,
++    seed,
+     max_new_tokens,
+     stop_token_ids,
+     stop_str,
+diff --git a/src/reason/llm_service/workers/vllm_worker.py b/src/reason/llm_service/workers/vllm_worker.py
+index e773ab8..af879f8 100644
+--- a/src/reason/llm_service/workers/vllm_worker.py
++++ b/src/reason/llm_service/workers/vllm_worker.py
+@@ -18,6 +18,10 @@ from vllm.sampling_params import SamplingParams
+ from vllm.utils import random_uuid
+ from transformers import AutoTokenizer
+ 
++from orches.collectors.compute_optimal_tts import (
++    VllmOutputSnapshot,
++    VllmSnapshotAccumulator,
++)
+ from reason.llm_service.workers.base_model_worker import BaseModelWorker
+ from fastchat.utils import get_context_length, build_logger
+ 
+@@ -78,6 +82,9 @@ class VLLMWorker(BaseModelWorker):
+         use_beam_search = params.get("use_beam_search", False)
+         best_of = params.get("best_of", None)
+         include_stop_str_in_output = params.get("include_stop_str_in_output", False)
++        if "seed" not in params:
++            raise ValueError("exact policy collection requires a sampling seed")
++        seed = int(params["seed"])
+ 
+         # Handle stop_str
+         stop = set()
+@@ -103,6 +110,7 @@ class VLLMWorker(BaseModelWorker):
+             stop_token_ids=stop_token_ids,
+             max_tokens=max_new_tokens,
+             top_k=top_k,
++            seed=seed,
+             presence_penalty=presence_penalty,
+             frequency_penalty=frequency_penalty,
+             best_of=best_of,
+@@ -110,8 +118,18 @@ class VLLMWorker(BaseModelWorker):
+             include_stop_str_in_output=include_stop_str_in_output,
+         )
+         results_generator = engine.generate(context, sampling_params, request_id)
++        evidence = VllmSnapshotAccumulator(expected_outputs=n)
+ 
+         async for request_output in results_generator:
++            evidence.observe(
++                tuple(request_output.prompt_token_ids),
++                tuple(
++                    VllmOutputSnapshot(
++                        output.index, tuple(output.token_ids), output.finish_reason
++                    )
++                    for output in request_output.outputs
++                ),
++            )
+             prompt = request_output.prompt
+             if echo:
+                 text_outputs = [prompt + output.text for output in request_output.outputs]
+@@ -133,6 +151,8 @@ class VLLMWorker(BaseModelWorker):
+                 "output_token_len": [len(output.token_ids) for output in request_output.outputs],
+                 "finish_reason": [output.finish_reason for output in request_output.outputs],
+             }
++            if evidence.is_complete:
++                ret.update(evidence.final_payload(request_id))
+             yield (json.dumps(ret) + "\0").encode()
+ 
+     async def generate(self, params):
+diff --git a/src/scripts/run.sh b/src/scripts/run.sh
+--- a/src/scripts/run.sh
++++ b/src/scripts/run.sh
+@@ -114,7 +114,8 @@
+ POLICY_MODEL_PATH=${LM}
+ VALUE_MODEL_PATH=${RM}
+ 
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ cd ${PYTHONPATH}
+ 
+ export CUDA_VISIBLE_DEVICES=0
+diff --git a/src/scripts/serve_gpu1.sh b/src/scripts/serve_gpu1.sh
+--- a/src/scripts/serve_gpu1.sh
++++ b/src/scripts/serve_gpu1.sh
+@@ -19,7 +19,8 @@
+ HOST_ADDR=$3
+ CONTROLLER_PORT=$4
+ WORKER_BASE_PORT=$5
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ PYTHON_EXECUTABLE=$(which python)
+ 
+ LOGDIR=${PYTHONPATH}/logs_fastchat
+diff --git a/src/scripts/serve_gpu2.sh b/src/scripts/serve_gpu2.sh
+--- a/src/scripts/serve_gpu2.sh
++++ b/src/scripts/serve_gpu2.sh
+@@ -19,7 +19,8 @@
+ HOST_ADDR=$3
+ CONTROLLER_PORT=$4
+ WORKER_BASE_PORT=$5
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ PYTHON_EXECUTABLE=$(which python)
+ 
+ LOGDIR=${PYTHONPATH}/logs_fastchat
+diff --git a/src/scripts/serve_gpu3_1-2.sh b/src/scripts/serve_gpu3_1-2.sh
+--- a/src/scripts/serve_gpu3_1-2.sh
++++ b/src/scripts/serve_gpu3_1-2.sh
+@@ -19,7 +19,8 @@
+ HOST_ADDR=$3
+ CONTROLLER_PORT=$4
+ WORKER_BASE_PORT=$5
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ PYTHON_EXECUTABLE=$(which python)
+ 
+ LOGDIR=${PYTHONPATH}/logs_fastchat
+diff --git a/src/scripts/serve_gpu3_2-1.sh b/src/scripts/serve_gpu3_2-1.sh
+--- a/src/scripts/serve_gpu3_2-1.sh
++++ b/src/scripts/serve_gpu3_2-1.sh
+@@ -19,7 +19,8 @@
+ HOST_ADDR=$3
+ CONTROLLER_PORT=$4
+ WORKER_BASE_PORT=$5
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ PYTHON_EXECUTABLE=$(which python)
+ 
+ LOGDIR=${PYTHONPATH}/logs_fastchat
+diff --git a/src/scripts/serve_gpu4.sh b/src/scripts/serve_gpu4.sh
+--- a/src/scripts/serve_gpu4.sh
++++ b/src/scripts/serve_gpu4.sh
+@@ -19,7 +19,8 @@
+ HOST_ADDR=$3
+ CONTROLLER_PORT=$4
+ WORKER_BASE_PORT=$5
+-export PYTHONPATH=$(pwd)
++: "${ORCHES_PYTHONPATH:?Set ORCHES_PYTHONPATH to the ORCHES src directory}"
++export PYTHONPATH="${ORCHES_PYTHONPATH}:$(pwd)"
+ PYTHON_EXECUTABLE=$(which python)
+ 
+ LOGDIR=${PYTHONPATH}/logs_fastchat

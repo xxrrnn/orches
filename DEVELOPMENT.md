@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4B.3 complete) | 149 tests; generation-only collection contract/manifest complete; real collector and launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.4A complete) | 159 tests; raw event/worker-token path complete; selection hook, real run, and launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -1115,6 +1115,107 @@ compute-optimal-TTS integration. It must first emit raw policy events, then
 construct this validated trace and manifest on the RTX 5070 Ti. PRM enrichment
 remains a later checkpoint.
 
+### M4B.4A Implementation Checkpoint: Raw Events and Worker Token Evidence
+
+#### Scope
+
+This checkpoint implements the source-independent raw event stream and the
+first compute-optimal-TTS integration layer. It reaches the vLLM worker's exact
+prompt/output token IDs and converts complete event fixtures into a validated
+generation-only trace. It does not yet attach candidate IDs to
+compute-optimal-TTS legal actions or observe the search tree's actual selected
+branch. No GPU model was run, so no real trace is claimed.
+
+#### Implementation Sequence
+
+1. Added strict `request_started`, `generation`, `selection`, and
+   `request_finished` events. One file contains one request, contiguous event
+   indices, one terminal status, exact collection configuration, and no decoded
+   prompt/output text.
+2. Added `PolicyGenerationOutput` with exact token IDs, call-local logical
+   readiness, output-KV materialization, return index, candidate ID, and finish
+   reason. Every generation event binds these outputs to one exact submitted
+   tensor, parent, worker request ID, RNG seed, and RNG stream.
+3. Added canonical atomic event JSONL and strict parsing. Unknown fields such as
+   `decoded_text` are rejected rather than silently retained.
+4. Added deterministic event-to-policy-trace construction. It derives root and
+   candidate KV blocks from exact input/materialization counts, globalizes token
+   readiness in event order, binds opaque decisions to the raw event SHA-256,
+   and delegates final tree validation to the M4B.3 contract.
+5. Preserved failed and OOM terminal event files. They remain inspectable but
+   are explicitly rejected as trace-buildable inputs; they are not converted
+   into successful request rows.
+6. Added `VllmSnapshotAccumulator`. It consumes cumulative vLLM
+   `RequestOutput` updates, checks append-only token IDs, waits for all requested
+   `n` sequences, and records only newly observed token order. Artifact size is
+   linear in generated tokens rather than quadratic in cumulative snapshots.
+7. Added `ComputeOptimalTtsAdapter`, which requires exact worker fields and
+   deliberately ignores upstream `text`, `usage`, and other content-bearing
+   response fields.
+8. Added an external patch for frozen compute-optimal-TTS commit `0ee2578`.
+   The patch carries the evaluation seed into vLLM `SamplingParams`, exposes
+   exact prompt/output/readiness/materialization evidence through the existing
+   response, and preserves upstream text fields only for upstream compatibility.
+9. Added a revision-checking patch script with check/apply/reverse modes and
+   explicit `ORCHES_PYTHONPATH` handling. Third-party source remains unchanged
+   in the ORCHES commit.
+10. Added `orches validate-policy-events` to report status, exact token totals,
+    raw hash, partial-evidence labeling, and whether a successful event stream
+    can construct the policy trace.
+
+#### Engine Transition Semantics
+
+vLLM exposes cumulative output IDs. On every engine update, the accumulator
+compares each sequence with its previous exact prefix and assigns a logical
+ready index only to newly appended IDs. Rewrites, missing output indices, and a
+request ending before all `n` outputs finish are errors.
+
+When a sequence first reports a terminal finish reason, its final sampled token
+has not entered another decode forward pass. The worker evidence therefore
+records:
+
+```text
+materialized_output_tokens = max(0, len(output_token_ids) - 1)
+```
+
+This is tied to the engine transition, not decoded characters. If the selected
+final token is submitted at the next reasoning step, the next exact prompt and
+KV-extension equation account for its later materialization together with any
+step-template tokens.
+
+#### Paper Correspondence
+
+| M4B.4A evidence | Paper relationship |
+|---|---|
+| Exact vLLM prompt/output IDs | Sec. 2.2 policy generation token workload |
+| Output-ready order without collector wall time | Technique 2B logical trigger input |
+| Engine-derived materialized positions | Sec. 3.3 KV growth and T3 lifetime input |
+| Fixed sampling seed and RNG stream | Reproducible Sec. 5.1 workload control flow |
+| Failed/OOM terminal events | Fair evaluation requirement to retain unsuccessful requests |
+| External frozen-source patch | Auditable integration without rewriting third-party history |
+
+#### Verification
+
+Ten focused tests cover source-response sanitization, interleaved width-2 token
+readiness, materialization at finish, waiting for every requested sequence,
+byte-stable event round trips, exact two-step event-to-trace conversion,
+decoded-text rejection, missing-field and noncontiguous-order failures,
+failed/OOM retention, CLI buildability reporting, and upstream
+`git apply --check`.
+
+The patch was also temporarily applied to `0ee2578`; all changed Python files
+passed `py_compile`, all changed launch scripts passed `bash -n`, patch whitespace
+passed, and the patch was reversed with a clean third-party worktree. The full
+repository suite passes 159 tests.
+
+#### Current Boundary
+
+The worker and client can now preserve the exact evidence required by the raw
+generation event. The missing M4B.4B hook is pipeline control flow: accepted
+legal actions need stable candidate IDs, and beam-search selection must emit the
+actual selected/pruned partition. Until that hook runs and writes events on the
+5070 Ti, `artifacts/traces/` still contains no real policy trace.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -1128,3 +1229,4 @@ remains a later checkpoint.
 | 2026-07-27 | M4B.1 | Implemented schema v2 exact-token tensors, logical KV lineage, multi-beam selection, scalar/pairwise verifiers, strict versioned I/O, and synthetic-only migration; 135 tests pass. |
 | 2026-07-27 | M4B.2 | Connected schema v2 to per-token ORCHES replay with multi-parent KV, exact verifier calls, ordered pruning, and phase-complete activity accounting; 141 tests pass, while real collection remains pending. |
 | 2026-07-27 | M4B.3 | Added a separately versioned generation-only policy trace, exact call/RNG/token/KV semantics, opaque/synthetic selection modes, reproducibility manifests, and strict CLI validation; 149 tests pass, while no real trace has yet been collected. |
+| 2026-07-27 | M4B.4A | Added strict raw policy events, deterministic event-to-trace conversion, vLLM snapshot/token/KV evidence, a sanitized compute-optimal-TTS adapter, and an audited external worker patch; 159 tests pass, while the search-tree selection hook and real run remain pending. |

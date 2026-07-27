@@ -8,6 +8,13 @@ import sys
 from pathlib import Path
 from typing import Mapping, Sequence
 
+from .collectors import (
+    CollectionStatus,
+    PolicyGenerationEvent,
+    build_policy_request_from_events,
+    policy_event_sha256,
+    read_policy_events,
+)
 from .config import load_hardware_config
 from .errors import ConfigurationError, OrchesInputError, SimulationError
 from .hardware import PimHardwareConfig
@@ -86,6 +93,19 @@ def _parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print a machine-readable policy trace summary.",
+    )
+
+    validate_policy_events = commands.add_parser(
+        "validate-policy-events",
+        help="Validate one raw exact-token policy event log.",
+    )
+    validate_policy_events.add_argument(
+        "path", type=Path, help="Path to one request event JSONL file"
+    )
+    validate_policy_events.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a machine-readable event summary.",
     )
 
     validate_model = commands.add_parser(
@@ -243,6 +263,43 @@ def _print_policy_trace_summary(summary: dict[str, object]) -> None:
             print(f"  {key}: {value}")
 
 
+def _policy_event_summary(path: Path) -> dict[str, object]:
+    events = read_policy_events(path)
+    started = events[0]
+    finished = events[-1]
+    generations = [
+        event for event in events if isinstance(event, PolicyGenerationEvent)
+    ]
+    summary: dict[str, object] = {
+        "path": str(path),
+        "sha256": policy_event_sha256(path),
+        "request_id": started.request_id,
+        "status": finished.status.value,
+        "events": len(events),
+        "generation_calls": len(generations),
+        "candidates": sum(len(event.outputs) for event in generations),
+        "generated_tokens": sum(
+            len(output.generated_token_ids)
+            for event in generations
+            for output in event.outputs
+        ),
+        "paper_eligible": False,
+        "trace_buildable": False,
+    }
+    if finished.status is CollectionStatus.SUCCESS:
+        trace = build_policy_request_from_events(
+            events,
+            raw_event_sha256=str(summary["sha256"]),
+        )
+        summary["trace_buildable"] = True
+        summary["generation_evaluation_eligible"] = (
+            trace.generation_evaluation_eligible
+        )
+    else:
+        summary["error"] = finished.error
+    return summary
+
+
 def _print_mapping_summary(title: str, summary: dict[str, object]) -> None:
     print(title)
     for key, value in summary.items():
@@ -280,6 +337,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(summary, indent=2, sort_keys=True))
             else:
                 _print_policy_trace_summary(summary)
+            return 0
+        if args.command == "validate-policy-events":
+            summary = _policy_event_summary(args.path)
+            if args.json:
+                print(json.dumps(summary, indent=2, sort_keys=True))
+            else:
+                _print_mapping_summary("valid policy events", summary)
             return 0
         if args.command == "validate-model-config":
             summary = load_transformer_config(args.path).summary()
