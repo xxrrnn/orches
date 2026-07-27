@@ -107,6 +107,11 @@ class EventTimeline:
             event.duration_s for event in self._events if event.resource is resource
         )
 
+    def available_time_s(self, resource: Resource) -> float:
+        """Return when a resource can accept its next non-preemptive event."""
+
+        return self._resource_available_s.get(resource, 0.0)
+
     def utilization(self, resource: Resource) -> float:
         if self.makespan_s == 0:
             return 0.0

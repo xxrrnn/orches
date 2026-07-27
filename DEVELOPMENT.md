@@ -13,7 +13,7 @@ files, tests, and raw result manifests.
 | M0 | Environment and source freeze | Complete | `uv.lock`, `.python-version`, `third_party.lock` |
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2A complete) | 64 tests; native PIM smoke; real traces/GPU calibration pending |
-| M3 | ORCHES Techniques 1, 2, and 3 | Not started | - |
+| M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
 | M4 | Baselines, energy, area, utilization | Not started | - |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
@@ -490,6 +490,173 @@ the command path only; it is not an evaluation throughput point.
 The required calibration matrix and acceptance criteria are in
 `docs/calibration.md`.
 
+## M3: Core ORCHES Techniques and Request Replay
+
+### Checkpoint Scope
+
+This checkpoint implements the functional behavior of Techniques 1, 2, and 3
+from Sec. 4.2-4.4 and composes them on one request-level resource timeline. It
+establishes scheduling, prediction, rollback, branch pruning, address
+translation, and compaction invariants. It does not claim the paper's numerical
+speedup, energy, area, or memory-saving results: real traces and calibrated
+GPU/PIM/controller rates remain M2/M4 prerequisites for M5 evaluation.
+
+### Implementation Sequence
+
+1. Implemented T1A's small/medium/large placement table around explicit,
+   calibration-supplied width thresholds.
+2. Solved the Eq. (3)-(4) GPU/PIM linear crossing analytically and retained all
+   single-device and co-processing alternatives in each decision.
+3. Enforced the paper's `T_PIM >= max(T_GPU(alpha), T_PIM(alpha))` condition and
+   recorded host-I/O elements plus barrier imbalance.
+4. Implemented T1B's Eq. (5)-(7) over explicit `(W_i, L_i, D)` KV fragments,
+   sorting by width and solving at most one continuous critical alpha.
+5. Composed T1A linear and T1B attention timing into one per-resource
+   generation plan, including an all-PIM path for T2 speculation.
+6. Implemented the history-aligned small-PRM predictor, stable tie breaking,
+   explicit score aggregation alternatives, and the Fig. 13 prefix/suffix PRM
+   partition.
+7. Implemented a single-use speculation state machine with commit, rollback,
+   discarded-token/KV accounting, and large-PRM branch authority.
+8. Implemented token-thresholded T2B pre-verification on the shared GPU
+   timeline, including per-chunk overhead and a one-launch serial comparison.
+9. Implemented T3's weights-first KV allocator, physical holes, beta metric,
+   address cache, fixed/beta compaction policy, transaction-level relocation
+   trace, controller shared-KV buffer, and GPU synchronization accounting.
+10. Added request replay that connects all three techniques to one deterministic
+    GPU/PIM/controller/link resource timeline and exposes every decision and
+    traffic component.
+
+### Technique 1 Correspondence
+
+`scheduler/offline.py` maps Fig. 8(b)-(d) as follows:
+
+| Width tier | Linear primary | Shared KV query | Unique KV query |
+|---|---|---|---|
+| Small | PIM | PIM | PIM |
+| Medium | PIM | GPU | PIM |
+| Large | GPU | GPU | PIM |
+
+`TierThresholds` does not embed unexplained model-independent constants. The
+transition widths are assumption `A-T1-001` and must come from the frozen
+calibration for each model/bandwidth point. `solve_linear_balance_alpha`
+expresses both Eq. (3) and Eq. (4) as affine functions of alpha, solves their
+crossing, and clamps the result to the legal range. The selected decision keeps
+the original balance timing even when co-processing is rejected, allowing a
+reviewer to reconstruct the inequality.
+
+For T1B, each accumulated shared segment and each candidate-unique segment is
+an `AttentionFragment`. `balance_attention_fragments` begins at all-GPU,
+switches fragments to PIM in ascending width order, detects the first resource
+crossing, and solves only that fragment's alpha. `OnlineBalanceDecision`
+reports the complete alpha vector, critical fragment, ordered IDs, GPU/PIM
+components, critical path, and imbalance stall.
+
+### Technique 2 Correspondence
+
+`CandidateScorePath` stores the current small-PRM score and equal-length small/
+large historical arrays. With history alignment enabled, only completed
+history is replaced by large-PRM scores; the current score remains from the
+small PRM as shown in Fig. 9(c). Mean, minimum, and last aggregation are all
+implemented because the paper does not disclose its aggregate function
+(`A-T2-001`).
+
+The T2A timeline gives the GPU priority to large-PRM verification and uses PIM
+for speculative next-step generation. T1 is disabled during this window by
+using the all-PIM generation plan. At large-PRM completion, a match preserves
+completed speculative work and restores T1 for the remainder. A mismatch
+materializes and prunes the wrong speculative KV, executes one controller
+rollback event, and regenerates from the trace's large-PRM-selected candidate.
+
+T2B turns token completion times into batches. Once the explicit
+`min_prefill_tokens` threshold is met, the batch is submitted to the GPU event
+timeline; existing generation/verification events delay it without overlap or
+double charging. The current implementation uses non-preemptive chunks and the
+paper-permitted delay behavior. Threshold and timing calibration are tracked by
+`A-T2-002`.
+
+### Technique 3 Correspondence
+
+The allocator keeps model weights in an immutable prefix. Shared and unique KV
+use aligned first fit in the reasoning region. Pruning deletes the physical
+allocation but does not lower the high-water mark, so the removed range becomes
+a real hole. The implemented interpretation of Sec. 4.4's metric is:
+
+```text
+beta = reasoning hole bytes / reasoning high-water span bytes
+```
+
+This excludes model weights and is recorded as `A-T3-003`. Compaction sorts
+live KV by physical address, packs it after the weight prefix, increments every
+moved block's generation, and reports moved/reclaimed bytes plus beta before
+and after. `memory/trace.py` emits an ordered DRAM read and write for every
+transaction of every move.
+
+The controller address cache maps the logical candidate/block ID to start,
+length, and generation. A valid hit models SRAM+DRAM; a miss models
+SRAM+DRAM+DRAM. A stale generation after compaction is invalidated and refilled.
+The cache is one controller-wide fully-associative LRU instance under
+`A-T3-001`; capacities and access latencies remain explicit inputs.
+
+The shared-KV buffer stages QKV output in controller SRAM and writes it to PIM
+banks with zero PIM-host bytes. GPU synchronization identifies whether bytes
+came directly from the resident controller buffer or were fetched from PIM
+banks. Compaction can trigger at any explicit beta threshold or after a fixed
+number of PRM verifications; intervals 3, 4, and 5 are tested because Sec. 5.5
+reports that range.
+
+### Request-Level Execution Order
+
+For each trace step, `OrchesRequestReplayer` performs the following auditable
+sequence:
+
+1. plan and schedule T1 generation on GPU and PIM;
+2. allocate candidate KV through the shared controller buffer;
+3. resolve candidate addresses and schedule controller lookup latency;
+4. feed token-ready batches into pipelined small-PRM verification;
+5. predict one candidate and schedule authoritative large-PRM verification;
+6. overlap next-step all-PIM speculation with the large PRM;
+7. commit or rollback, promote selected KV, and prune rejected KV;
+8. evaluate T3 policy and schedule generated compaction RD/WR traffic;
+9. restore T1 and execute the uncompleted or full next-step work.
+
+The replay result retains per-step decisions, all events, memory snapshots,
+prediction accuracy, compaction bytes, and resource busy time/utilization. A
+replayer is single-use so state from one request cannot leak into another.
+
+### Verification Evidence
+
+| Check | Result |
+|---|---|
+| Full Python suite | 105 passed |
+| Syntax compilation | Passed for `src` and `tests` |
+| T1A alpha | Analytical crossing matches a 10,001-point dense search |
+| T1A paper guard | Rejects co-processing when PIM-only is already faster |
+| T1B alpha vector | At most one fractional alpha; near small-grid optimum |
+| T2 history alignment | Corrects a constructed ranking; deterministic ties |
+| T2 speculation | Correct path commits; mismatch discards KV and rolls back once |
+| T2B pipeline | 0/partial/100% overlap, shared timeline, and serial overhead tested |
+| T3 allocation | Deterministic random allocate/prune/compact preserves live objects |
+| T3 address cache | LRU, hit/miss timing, eviction, prune, and stale generation tested |
+| T3 policies | Fixed intervals 3/4/5 and beta threshold tested |
+| T3 traffic | Compaction emits balanced transaction-level read/write bytes |
+| Request replay | Correct/mismatch prediction and T3 enabled/disabled compared |
+
+### Remaining Calibration and Evaluation Work
+
+1. Replace synthetic replay rates with frozen AGX Orin and native PIM
+   calibration; synthetic tests are not evaluation evidence.
+2. Collect real MATH500, LiveCodeBench, and MathVista traces with exact model and
+   tokenizer revisions.
+3. Derive per-model T1 tier thresholds and T2B prefill thresholds rather than
+   selecting values from final paper speedups.
+4. Calibrate cache SRAM, controller buffer, compaction bandwidth/energy, and
+   area; reproduce the reported 12% area and 0.12% runtime overhead definitions.
+5. Add GPU, AttAcc, Duplex, ORCHES-A/B/C adapters on identical trace inputs and
+   implement M4 energy/utilization accounting.
+6. Run the full evaluation matrix and compare Table 4/5, Fig. 11-13, and all
+   paper aggregates with deviation attribution.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -497,3 +664,4 @@ The required calibration matrix and acceptance criteria are in
 | 2026-07-27 | M0 | Froze environment and upstream source revisions; documented AttAcc's Ramulator2 revision override. |
 | 2026-07-27 | M1 | Added strict provenance-aware hardware contracts, corrected the PIM channel mapping, verified AGX Orin specifications, added bootstrap audit, and passed 14 tests. |
 | 2026-07-27 | M2A | Added deterministic TTC traces, six model profiles, operator/timing primitives, a generic event timeline, reversible PIM mapping, and native AttAcc smoke execution; 64 tests pass, while real traces and GPU calibration remain pending. |
+| 2026-07-27 | M3 | Implemented T1A/T1B scheduling, history-aligned prediction, speculative rollback, pipelined verification, fragmentation-aware memory structuring, and request-level replay; 105 tests pass, while calibrated evaluation remains pending. |

@@ -43,3 +43,11 @@ def test_unscheduled_dependency_is_rejected() -> None:
             1.0,
             dependencies=("missing",),
         )
+
+
+def test_available_time_tracks_each_resource_independently() -> None:
+    timeline = EventTimeline()
+    timeline.schedule("gpu", Resource.GPU, 2.0)
+
+    assert timeline.available_time_s(Resource.GPU) == 2.0
+    assert timeline.available_time_s(Resource.PIM) == 0.0

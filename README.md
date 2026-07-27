@@ -69,6 +69,19 @@ uv run orches validate-model-config configs/models/policy/qwen2.5-1.5b.yaml
 uv run orches pim-microbench artifacts/raw/pim-smoke --json
 ```
 
+The M3 ORCHES implementation is organized by paper technique:
+
+```text
+src/orches/scheduler/   Technique 1A/1B assignment and balancing
+src/orches/predictor/   Technique 2A/2B prediction and verification
+src/orches/memory/      Technique 3 allocation, cache, buffer, and compaction
+src/orches/replay.py    request-level composition on one event timeline
+```
+
+`docs/orches-techniques.md` explains the execution sequence and exact paper
+correspondence. Its synthetic replay tests validate control flow but do not
+replace real workload collection or hardware calibration.
+
 `DEVELOPMENT.md` is the milestone ledger. `REPRODUCTION_PLAN.md` describes the
 full implementation and evaluation plan, and `docs/paper-to-code.md` maps paper
 claims to implementation and tests.
