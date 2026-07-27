@@ -103,14 +103,19 @@ def replay_activity(
         raise ConfigurationError("cache_entry_bytes must be a positive integer")
     total = verifier_activity or EnergyActivity()
     for step in result.steps:
-        total += generation_plan_activity(
-            step.generation.plan,
-            work_fraction=step.generation.t1_work_fraction,
-            bytes_per_element=bytes_per_element,
-        )
-        if step.speculative_plan is not None:
+        generation_plans = step.generation.phase_plans or (step.generation.plan,)
+        for plan in generation_plans:
             total += generation_plan_activity(
-                step.speculative_plan,
+                plan,
+                work_fraction=step.generation.t1_work_fraction,
+                bytes_per_element=bytes_per_element,
+            )
+        speculative_plans = step.speculative_plans or (
+            (step.speculative_plan,) if step.speculative_plan is not None else ()
+        )
+        for plan in speculative_plans:
+            total += generation_plan_activity(
+                plan,
                 work_fraction=step.speculative_work_fraction,
                 bytes_per_element=bytes_per_element,
                 force_all_pim=True,

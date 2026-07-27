@@ -226,19 +226,25 @@ def _verifier_call(raw_value: Any, path: str) -> VerifierCallTraceV2:
             "kind",
             "stage",
             "candidate_ids",
-            "input_tokens",
+            "input_tensors",
             "generated_token_ids",
             "scores",
             "winner_candidate_id",
         },
     )
     scores_raw = _array(raw["scores"], f"{path}.scores")
+    input_tensors_raw = _array(
+        raw["input_tensors"], f"{path}.input_tensors"
+    )
     return VerifierCallTraceV2(
         call_id=_string(raw, "call_id", path),
         kind=_enum(VerifierKind, raw["kind"], f"{path}.kind"),
         stage=_string(raw, "stage", path),
         candidate_ids=_string_array(raw["candidate_ids"], f"{path}.candidate_ids"),
-        input_tokens=_token_tensor(raw["input_tokens"], f"{path}.input_tokens"),
+        input_tensors=tuple(
+            _token_tensor(tensor, f"{path}.input_tensors[{index}]")
+            for index, tensor in enumerate(input_tensors_raw)
+        ),
         generated_token_ids=_integer_array(
             raw["generated_token_ids"], f"{path}.generated_token_ids"
         ),

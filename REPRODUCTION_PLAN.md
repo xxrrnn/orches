@@ -251,8 +251,10 @@ orches/
 ### Phase 2：构建 TTC workload trace
 
 状态：schema v2 已实现 exact token/mask、逻辑 KV block lineage、`search_width` 与
-`beam_size` 分离、scalar PRM/pairwise judge 和有序 selection events。真实 pipeline collector
-尚未实现，因此目前没有 evaluation trace。
+`beam_size` 分离、scalar PRM/pairwise judge 和有序 selection events；v2 replay 已按实际
+generated-token round、materialized KV、多 parent lineage 和 verifier/selection 顺序接入
+T1/T2/T3。真实 pipeline collector 尚未实现，因此目前没有 evaluation trace，也不能产出
+论文数值对齐结论。
 
 实现：
 
@@ -490,15 +492,15 @@ fragmentation/compaction difference
 
 | 论文位置 | 论文机制 | 计划实现 |
 |---|---|---|
-| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `workload/schema.py`, `collector.py`, `replay.py` |
+| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `workload/schema_v2.py`, `replay_v2.py`；`collector.py` 待实现 |
 | Sec. 3.1, Fig. 4-5 | variable parallelism、shared/unique KV | `models/operators.py`, `scheduler/roofline.py` |
 | Sec. 3.2, Fig. 6 | branch dependency 和相互等待 | `sim/event.py`, `predictor/pipeline.py` |
-| Sec. 3.3 | pruning 产生 fragmentation | `memory/allocator.py` |
+| Sec. 3.3 | pruning 产生 fragmentation | `memory/allocator.py`, `replay_v2.py` ordered pruning |
 | Sec. 4.1, Fig. 7 | GPU/controller die/memory die | hardware YAML、`gpu.py`, `pim.py`, Ramulator C++ |
 | Sec. 4.2.1, Eq. 1-4 | T1A offline assignment/co-processing | `scheduler/offline.py` |
 | Sec. 4.2.2, Eq. 5-7 | T1B online compensation | `scheduler/online.py` |
 | Sec. 4.3.1, Fig. 9a-c | predictor/history alignment/rollback | `predictor/history.py`, `speculation.py` |
-| Sec. 4.3.2, Fig. 9d | pipelined verification | `predictor/pipeline.py` |
+| Sec. 4.3.2, Fig. 9d | pipelined verification | `predictor/pipeline.py`, `replay_v2.py` token-ready mapping |
 | Sec. 4.4, Fig. 10 | address cache/reorg/KV buffer | `memory/address_cache.py`, `compactor.py`, `kv_buffer.py` |
 | Sec. 5.1 | hardware、simulator、models、datasets | `configs/`, `third_party.lock`, calibration docs |
 | Sec. 5.2-5.6 | 主结果和消融 | `configs/experiments/`, `eval/runner.py`, `eval/plots.py` |

@@ -48,10 +48,10 @@ def plan_generation_step(
             "one unique-KV length is required for every branch"
         )
     if any(
-        isinstance(length, bool) or not isinstance(length, int) or length <= 0
+        isinstance(length, bool) or not isinstance(length, int) or length < 0
         for length in unique_kv_tokens
     ):
-        raise ConfigurationError("unique-KV lengths must be positive integers")
+        raise ConfigurationError("unique-KV lengths must be non-negative integers")
     if (
         isinstance(repetitions, bool)
         or not isinstance(repetitions, int)
@@ -74,6 +74,7 @@ def plan_generation_step(
                 hidden_size=hidden_size,
             )
             for index, length in enumerate(unique_kv_tokens)
+            if length > 0
         ),
     )
     offline = scheduler.assign(branch_width, hidden_size)

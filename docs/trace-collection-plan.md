@@ -134,15 +134,20 @@ parsing in `io_v2.py`. It closes three structural gaps in synthetic schema v1:
    beam selection and may miss template/special-token effects.
 
 The implementation provides `scalar_prm` and `pairwise_judge` calls, ordered
-selection events, selected-candidate lists, exact input/generated token IDs,
+selection events, selected-candidate lists, per-candidate scalar input tensors,
+exact input/generated token IDs,
 separate output-KV materialization, and append-only KV lineage blocks. It does
 not invent a numeric vision score when the source pipeline only produced a
 pairwise choice. Tests cover width 4, beam size 3, two retained parents, and
 pairwise elimination order.
 
-The remaining gap is collection, not representation: no compute-optimal-TTS or
-LLaVA-CoT run has emitted a real schema-v2 trace yet. Synthetic v1 migration is
-explicitly ineligible because v1 never contained real token IDs.
+Schema-v2 replay is also implemented: generation is expanded by actual output
+token round, parent-lineage intersections drive shared/unique attention, exact
+materialized positions drive physical KV bytes, and verifier/selection events
+drive ordered pruning. The remaining gap is collection, not representation or
+functional replay: no compute-optimal-TTS or LLaVA-CoT run has emitted a real
+schema-v2 trace yet. Synthetic v1 migration is explicitly ineligible because
+v1 never contained real token IDs.
 
 ## Text Pipeline Audit
 
@@ -362,11 +367,13 @@ a documented determinism result.
 
 1. [Complete] Add schema v2 verifier calls, exact token/KV lineage,
    multi-selection semantics, and synthetic-only v1 migration.
-2. Add host probing and collection manifests.
-3. Implement the text trace sink and complete-tree export.
-4. Implement layer-10/final PRM scoring with architecture-specific tests.
-5. Run the 5070 Ti smallest-pair pilot.
-6. Pin executable LLaVA-CoT and implement width-2/4 tournament export.
-7. Run server 10-request, 50-request, then full matrices.
-8. Replay the frozen traces with `paper_method`; run `orin_calibrated` only when
+2. [Complete] Replay schema v2 with per-token generation, multi-parent KV,
+   exact selection-verifier work, and ordered physical pruning.
+3. Add host probing and collection manifests.
+4. Implement the text trace sink and complete-tree export.
+5. Implement layer-10/final PRM scoring with architecture-specific tests.
+6. Run the 5070 Ti smallest-pair pilot.
+7. Pin executable LLaVA-CoT and implement width-2/4 tournament export.
+8. Run server 10-request, 50-request, then full matrices.
+9. Replay the frozen traces with `paper_method`; run `orin_calibrated` only when
    target hardware is available.

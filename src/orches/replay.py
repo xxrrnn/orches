@@ -108,6 +108,9 @@ class GenerationExecution:
     t1_work_fraction: float
     speculative_work_fraction: float
     completion_s: float
+    phase_plans: tuple[GenerationPlan, ...] = ()
+    phase_gpu_events: tuple[Event, ...] = ()
+    phase_pim_events: tuple[Event, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -129,6 +132,26 @@ class CompactionExecution:
 
 
 @dataclass(frozen=True)
+class VerifierCallExecution:
+    """One schema-v2 verifier call and its scheduled GPU interval."""
+
+    call_id: str
+    event: Event
+
+
+@dataclass(frozen=True)
+class SelectionEventExecution:
+    """One ordered schema-v2 branch decision and physical KV release."""
+
+    event_index: int
+    event: Event
+    selected_candidate_ids: tuple[str, ...]
+    pruned_candidate_ids: tuple[str, ...]
+    freed_kv_block_ids: tuple[str, ...]
+    retained_kv_block_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class StepReplayResult:
     """Complete decisions and accounting for one reasoning step."""
 
@@ -136,7 +159,7 @@ class StepReplayResult:
     generation: GenerationExecution
     address_lookups: tuple[AddressLookupExecution, ...]
     verification: PipelinedVerificationResult
-    prediction: PredictionDecision
+    prediction: PredictionDecision | None
     large_prm_event: Event
     speculation: SpeculationResolution | None
     speculative_event: Event | None
@@ -147,6 +170,9 @@ class StepReplayResult:
     memory_after_step: MemoryStats
     compaction_decision: CompactionDecision | None
     compaction: CompactionExecution | None
+    verifier_calls: tuple[VerifierCallExecution, ...] = ()
+    selection_events: tuple[SelectionEventExecution, ...] = ()
+    speculative_plans: tuple[GenerationPlan, ...] = ()
 
 
 @dataclass(frozen=True)

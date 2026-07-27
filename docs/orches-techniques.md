@@ -154,6 +154,15 @@ outcomes, memory snapshots, cache behavior, compaction traffic, and GPU/PIM/
 controller utilization. Synthetic replay tests are control-flow evidence only
 and must never be used as paper evaluation points.
 
+`replay_v2.py` applies the same technique modules to exact-token traces. It
+creates one generation plan per generated-token round, derives shared/unique
+attention from all active parent KV lineages, allocates only recorded
+materialized KV positions, and interleaves scalar/pairwise verifier calls with
+ordered physical pruning. T2A remains limited to one retained beam because the
+paper's predictor produces one speculative branch; multi-beam requests still
+exercise T1, T2B, and T3 without silently choosing a winner. See
+`docs/workload-trace.md` for the v2 invariants and remaining collector boundary.
+
 ## Verification
 
 Run all tests:

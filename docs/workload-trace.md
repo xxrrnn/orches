@@ -122,15 +122,45 @@ freeing only the actual losing candidate's KV.
 
 Schema v2 represents both paper workload families:
 
-- `scalar_prm`: exact verifier input tokens and one finite score per candidate;
-  separate stages can record layer-10 and final PRM outputs;
+- `scalar_prm`: one exact input tensor and one finite score per candidate;
+  a model invocation may batch several candidates or be recorded as one call
+  per candidate, and separate stages can record layer-10 and final PRM outputs;
 - `pairwise_judge`: exactly two candidates, exact judge input/generated token
-  IDs, no invented scalar score, and one winner.
+  IDs in one combined judge tensor, no invented scalar score, and one winner.
+
+`model_input_tokens` is derived as the sum of all `input_tensors`. This avoids
+the invalid assumption that a batched scalar PRM call has one shared token
+sequence: each candidate is processed with its own exact submitted tensor.
 
 A top-k event must reference scalar PRM calls covering every considered
 candidate. A pairwise event must reference exactly one pairwise call and follow
 its recorded winner. Pairwise tournament events therefore preserve the precise
 loser-prune order required for LLaVA-CoT KV lifetime replay.
+
+## Schema-v2 Replay
+
+`OrchesV2RequestReplayer` consumes the validated tree without reducing it to
+v1's single winner. One generation phase is created for each output-token
+round. For every active candidate, attention length is derived from its exact
+model input, the intersection of active parent KV lineages, and the number of
+earlier generated tokens. Candidates that finish early leave later rounds.
+
+Physical KV allocation uses `materialized_output_tokens`. Selection-driving
+verifier duration uses the sum of exact input-tensor model positions plus any
+generated judge-decision tokens. Every ordered selection event then releases
+all physical blocks outside `retained_kv_block_ids`; a later pairwise judge
+depends on the preceding selection event.
+
+Logical `token_ready_indices` are mapped proportionally into the simulated T1
+generation interval. Absolute collection latency is not replayed. T2A is
+enabled only when `beam_size=1`; retaining several beams has no unique predicted
+branch under the paper's current predictor definition. T1, T2B, verifier
+execution, and T3 remain active for multi-beam traces.
+
+The current T2B adapter assigns incremental work to policy tokens becoming
+ready. Exact cross-tokenizer readiness of PRM input positions is a collector
+gap tracked by `A-T2-003`, not a reason to substitute character counts or RTX
+5070 Ti timestamps.
 
 ## Validation Coverage
 
@@ -138,7 +168,8 @@ Focused tests cover byte-stable v2 round trips, width 4 with non-first winners,
 two retained parents expanded in the next step, beam size 3, generated/KV count
 differences, MathVista-style pairwise elimination, exact parent token prefixes,
 global token-ready dependencies, retained-KV ancestry, v1 collected rejection,
-and deterministic synthetic migration.
+deterministic synthetic migration, per-token replay, ordered physical pruning,
+candidate-local PRM calls, and phase-complete activity accounting.
 
 ## Paper Mapping
 

@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4B.1 complete) | 135 tests; trace schema/contracts/accounting complete; collectors/launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.2 complete) | 141 tests; exact-token replay/contracts/accounting complete; collectors/launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -914,6 +914,102 @@ The next implementation checkpoint is host probing plus collection manifests,
 followed by the compute-optimal-TTS event sink. Until that sink runs on a visible
 GPU, the repository still has no real workload trace.
 
+### M4B.2 Implementation Checkpoint: Schema-V2 ORCHES Replay
+
+#### Scope
+
+This checkpoint connects validated schema-v2 requests to the functional
+ORCHES T1/T2/T3 simulator. It replaces v1 replay assumptions that counted one
+generation operation per reasoning step, retained exactly one winner, and made
+generated-token count equal KV growth. It does not add a real trace collector,
+calibrate the analytical rates, or produce paper evaluation numbers.
+
+#### Implementation Sequence
+
+1. Added `OrchesV2RequestReplayer` as a separate adapter so the existing v1
+   synthetic path remains byte- and behavior-compatible.
+2. Expanded each reasoning step into one `GenerationPlan` per actual generated
+   token round. Candidates that have already stopped are removed from later
+   rounds, so active branch width follows the recorded output lengths.
+3. Derived shared and unique attention fragments from parent KV ancestry. This
+   supports several retained parents whose private lineages remain distinct in
+   the next expansion.
+4. Allocated physical KV from `materialized_output_tokens`, not decoded text or
+   generated-token count. A zero-length extension reuses the parent terminal
+   block and does not create a fake allocation.
+5. Converted request-global logical token-ready indices into simulated readiness
+   within the analytical generation interval. Collector wall time is never used.
+6. Scheduled selection-driving scalar and pairwise verifier calls from their
+   exact model-input token tensors plus generated decision tokens.
+7. Interleaved every verifier call with its ordered selection event. Later
+   pairwise judges depend explicitly on the previous prune event; physical KV
+   blocks are freed from the event's exact retained-lineage set.
+8. Kept T2A prediction/speculation enabled only for `beam_size=1`, which matches
+   the paper's main text setting of one retained sequence. Multi-beam replay
+   still executes T1, T2B, verifier decisions, and T3. Pairwise vision traces do
+   not fabricate the scalar scores required by T2A.
+9. Extended replay activity accounting to sum every generation/speculation
+   phase rather than charging only the first token plan.
+
+#### Per-Token Execution Model
+
+For generated-token round `r`, let `A_r` be candidates whose recorded output
+contains token `r`. The adapter computes:
+
+```text
+shared_r = tokens in the intersection of all active parent KV lineages
+unique_i_r = candidate_i.model_input_tokens + r - shared_r
+active_width_r = count(A_r)
+```
+
+`shared_r` and every nonzero `unique_i_r` become T1B attention fragments. The
+formula counts the context visible when generating token `r`; the generated
+token itself enters the next decode round. Physical output KV is handled
+separately using the trace's materialization count.
+
+A selection-driving verifier call uses:
+
+```text
+verifier_tokens = sum(input_tensor.model_token_count)
+                + count(generated_decision_token_ids)
+duration = verifier_tokens * configured_verifier_time_per_token
+```
+
+T2B currently models incremental pre-verification over policy tokens as they
+become ready. Full verifier tensors are retained for exact final-call sizing;
+cross-tokenizer alignment between a streamed policy token and newly available
+PRM input positions must be supplied by the real collector before that timing
+can be called checkpoint-exact (`A-T2-003`).
+
+#### Paper Correspondence
+
+| Implemented behavior | Paper relationship |
+|---|---|
+| Per-token active widths and parent-lineage fragments | Sec. 3.1-3.2 and Technique 1A/1B workload inputs |
+| Logical readiness mapped onto analytical time | Technique 2B without importing RTX 5070 Ti timing |
+| Single-retained-path predictor/speculation | Technique 2A and the paper's `num_sequence=1` text setup |
+| Exact scalar/pairwise verifier workload | Sec. 2.2 TTC verification and LLaVA-CoT judging |
+| Ordered physical KV release and retained ancestry | Sec. 3.3 and Technique 3 memory lifetime |
+| All token phases included in activity | Sec. 5.2 energy-accounting prerequisite |
+
+#### Verification
+
+Six new replay tests cover per-token generation phases, `beam_size=3`, exact
+materialized KV bytes, two retained parent lineages across steps, ordered
+pairwise judge/prune dependencies, candidate-local small-PRM calls, single-use
+state isolation, and activity accumulation over all phases. The complete Python
+suite passes 141 tests. Syntax compilation and `git diff --check` also pass.
+
+#### Current Boundary
+
+The simulator can now consume a valid schema-v2 trace without collapsing its
+token, beam, verifier, or KV semantics. This is the normal analytical PIM
+accelerator workflow used by AttAcc/Duplex-style studies: workload control flow
+feeds operator and memory models, with native Ramulator used for memory-command
+validation. It is not RTL, cycle-accurate end-to-end GPU execution, or measured
+ORCHES silicon. Quantitative alignment still requires real traces, frozen
+`paper_method` rates, executable baselines, and the M5 deviation report.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -925,3 +1021,4 @@ GPU, the repository still has no real workload trace.
 | 2026-07-27 | M4A | Added paper baseline definitions, fairness fingerprints, strict AttAcc/Duplex/ORCHES adapters, and unit-explicit energy/area/utilization accounting; 121 tests pass, while executable launchers and calibration remain pending. |
 | 2026-07-27 | M4B design | Audited AttAcc/Duplex GPU models and both workload sources; separated paper-method timing from optional Orin calibration and froze the 5070 Ti/server trace-collection plan. |
 | 2026-07-27 | M4B.1 | Implemented schema v2 exact-token tensors, logical KV lineage, multi-beam selection, scalar/pairwise verifiers, strict versioned I/O, and synthetic-only migration; 135 tests pass. |
+| 2026-07-27 | M4B.2 | Connected schema v2 to per-token ORCHES replay with multi-parent KV, exact verifier calls, ordered pruning, and phase-complete activity accounting; 141 tests pass, while real collection remains pending. |

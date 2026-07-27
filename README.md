@@ -75,12 +75,15 @@ The M3 ORCHES implementation is organized by paper technique:
 src/orches/scheduler/   Technique 1A/1B assignment and balancing
 src/orches/predictor/   Technique 2A/2B prediction and verification
 src/orches/memory/      Technique 3 allocation, cache, buffer, and compaction
-src/orches/replay.py    request-level composition on one event timeline
+src/orches/replay.py    schema-v1 synthetic request composition
+src/orches/replay_v2.py exact-token, multi-parent request composition
 ```
 
 `docs/orches-techniques.md` explains the execution sequence and exact paper
-correspondence. Its synthetic replay tests validate control flow but do not
-replace real workload collection or hardware calibration.
+correspondence. Schema-v2 replay preserves actual token rounds, materialized KV,
+multiple retained beams, and ordered scalar/pairwise selection. These tests
+validate control flow but do not replace real workload collection or hardware
+calibration.
 
 M4 comparison code uses one common result boundary:
 

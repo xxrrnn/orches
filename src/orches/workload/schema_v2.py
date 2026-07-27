@@ -254,7 +254,7 @@ class VerifierCallTraceV2:
     kind: VerifierKind
     stage: str
     candidate_ids: tuple[str, ...]
-    input_tokens: TokenTensorTrace
+    input_tensors: tuple[TokenTensorTrace, ...]
     generated_token_ids: tuple[int, ...]
     scores: tuple[float, ...]
     winner_candidate_id: str | None
@@ -265,6 +265,8 @@ class VerifierCallTraceV2:
         if not self.candidate_ids:
             raise WorkloadTraceError("verifier call.candidate_ids must not be empty")
         _require_unique("verifier call.candidate_ids", self.candidate_ids)
+        if not self.input_tensors:
+            raise WorkloadTraceError("verifier call.input_tensors must not be empty")
         for candidate_id in self.candidate_ids:
             _require_nonempty("verifier call candidate ID", candidate_id)
         for index, token_id in enumerate(self.generated_token_ids):
@@ -287,6 +289,10 @@ class VerifierCallTraceV2:
                 raise WorkloadTraceError(
                     "scalar PRM call must not contain generated token IDs"
                 )
+            if len(self.input_tensors) != len(self.candidate_ids):
+                raise WorkloadTraceError(
+                    "scalar PRM input tensors must match verifier candidate IDs"
+                )
         else:
             if len(self.candidate_ids) != 2:
                 raise WorkloadTraceError(
@@ -302,6 +308,14 @@ class VerifierCallTraceV2:
                 raise WorkloadTraceError(
                     "pairwise judge must record its generated decision tokens"
                 )
+            if len(self.input_tensors) != 1:
+                raise WorkloadTraceError(
+                    "pairwise judge must record one combined judge input tensor"
+                )
+
+    @property
+    def model_input_tokens(self) -> int:
+        return sum(tensor.model_token_count for tensor in self.input_tensors)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -309,7 +323,7 @@ class VerifierCallTraceV2:
             "kind": self.kind.value,
             "stage": self.stage,
             "candidate_ids": list(self.candidate_ids),
-            "input_tokens": self.input_tokens.to_dict(),
+            "input_tensors": [tensor.to_dict() for tensor in self.input_tensors],
             "generated_token_ids": list(self.generated_token_ids),
             "scores": list(self.scores),
             "winner_candidate_id": self.winner_candidate_id,
@@ -598,9 +612,9 @@ class TtcRequestTraceV2:
                     raise WorkloadTraceError(
                         f"verifier call {call.call_id!r} references another step"
                     )
-                if self.modality is Modality.TEXT and (
-                    call.input_tokens.model_token_count
-                    != call.input_tokens.valid_token_count
+                if self.modality is Modality.TEXT and any(
+                    tensor.model_token_count != tensor.valid_token_count
+                    for tensor in call.input_tensors
                 ):
                     raise WorkloadTraceError(
                         "text verifier model_token_count must equal valid token IDs"

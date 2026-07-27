@@ -114,7 +114,6 @@ def migrate_synthetic_v1_to_v2(trace: TtcRequestTrace) -> TtcRequestTraceV2:
         candidate_ids = tuple(candidate.candidate_id for candidate in candidates)
         small_call_id = f"{trace.request_id}:s{step.step_index}:small"
         final_call_id = f"{trace.request_id}:s{step.step_index}:final"
-        verifier_input = _token_tensor(parent_output_ids, trace.image_tokens)
         selected = next(
             candidate
             for candidate in candidates
@@ -131,7 +130,13 @@ def migrate_synthetic_v1_to_v2(trace: TtcRequestTrace) -> TtcRequestTraceV2:
                         kind=VerifierKind.SCALAR_PRM,
                         stage="synthetic-small",
                         candidate_ids=candidate_ids,
-                        input_tokens=verifier_input,
+                        input_tensors=tuple(
+                            _token_tensor(
+                                candidate.full_output_token_ids,
+                                trace.image_tokens,
+                            )
+                            for candidate in candidates
+                        ),
                         generated_token_ids=(),
                         scores=tuple(
                             candidate.small_prm_score for candidate in step.candidates
@@ -143,7 +148,13 @@ def migrate_synthetic_v1_to_v2(trace: TtcRequestTrace) -> TtcRequestTraceV2:
                         kind=VerifierKind.SCALAR_PRM,
                         stage="synthetic-final",
                         candidate_ids=candidate_ids,
-                        input_tokens=verifier_input,
+                        input_tensors=tuple(
+                            _token_tensor(
+                                candidate.full_output_token_ids,
+                                trace.image_tokens,
+                            )
+                            for candidate in candidates
+                        ),
                         generated_token_ids=(),
                         scores=tuple(
                             candidate.large_prm_score for candidate in step.candidates

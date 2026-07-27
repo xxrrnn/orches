@@ -94,7 +94,7 @@ def _scalar_call(
         kind=VerifierKind.SCALAR_PRM,
         stage=stage,
         candidate_ids=candidate_ids,
-        input_tokens=_tokens(500, 501, 502),
+        input_tensors=tuple(_tokens(500, 501, 502) for _ in candidate_ids),
         generated_token_ids=(),
         scores=scores,
         winner_candidate_id=None,
@@ -267,10 +267,12 @@ def _pairwise_trace() -> TtcRequestTraceV2:
             kind=VerifierKind.PAIRWISE_JUDGE,
             stage="REASONING",
             candidate_ids=(first, second),
-            input_tokens=TokenTensorTrace(
-                (600, 601, 602, 603),
-                (1, 1, 1, 1),
-                580,
+            input_tensors=(
+                TokenTensorTrace(
+                    (600, 601, 602, 603),
+                    (1, 1, 1, 1),
+                    580,
+                ),
             ),
             generated_token_ids=(42,),
             scores=(),
