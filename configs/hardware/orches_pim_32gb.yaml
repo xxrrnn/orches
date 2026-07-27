@@ -1,0 +1,106 @@
+schema_version: 1
+name: orches_pim_32gb
+kind: pim
+
+pim:
+  memory_standard:
+    value: HBM3-PIM
+    source: "ORCHES Sec. 5.1; AttAcc HBM3-PIM model"
+    status: INHERITED
+    note: "ORCHES inherits AttAcc timing and energy values."
+
+  ramulator_organization_preset:
+    value: HBM3_8Gb_2R
+    source: "AttAcc attacc_bank.yaml and HBM3-PIM.cpp at frozen commit"
+    status: INHERITED
+    note: "Preserves AttAcc's bank-level baseline organization preset."
+
+  reported_capacity_gb:
+    value: 32.0
+    source: "ORCHES Sec. 5.1"
+    status: PAPER
+    note: "The paper reports decimal GB without an address-level unit definition."
+
+  simulated_capacity_gib:
+    value: 32.0
+    source: "Derived mapping from ORCHES Sec. 5.1 to the AttAcc HBM3_8Gb_2R organization"
+    status: ASSUMED
+    note: "Ramulator2 uses binary organization sizes, so the model represents 32 GiB."
+
+  channel_density_gibits:
+    value: 8.0
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  channels:
+    value: 32
+    source: "Derived from ORCHES 32 GB/2048-bank requirements and the AttAcc HBM3_8Gb_2R preset"
+    status: ASSUMED
+    note: "AttAcc uses 16 channels; ORCHES requires a twofold capacity and bank-count scale."
+
+  pseudochannels_per_channel:
+    value: 2
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  ranks_per_pseudochannel:
+    value: 2
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  bankgroups_per_rank:
+    value: 4
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  banks_per_bankgroup:
+    value: 4
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  rows_per_bank:
+    value: 16384
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  columns_per_row:
+    value: 32
+    source: "AttAcc HBM3_8Gb_2R organization preset at frozen commit"
+    status: INHERITED
+
+  transaction_bytes:
+    value: 32
+    source: "AttAcc bank-level trace generator prefetch_size at frozen commit"
+    status: INHERITED
+
+  expected_bank_count:
+    value: 2048
+    source: "ORCHES Sec. 5.1"
+    status: PAPER
+
+  gemv_lanes_per_bank:
+    value: 16
+    source: "ORCHES Sec. 4.1 and Sec. 5.1"
+    status: PAPER
+    note: "Each lane is modeled as one multiplier plus adder datapath."
+
+  host_io_bandwidth_gb_per_s:
+    value: 204.8
+    source: "ORCHES Sec. 5.1"
+    status: PAPER
+    note: "This link limit is separate from aggregate internal bank bandwidth."
+
+  ramulator_timing_preset:
+    value: HBM3_5.2Gbps
+    source: "AttAcc attacc_bank.yaml at frozen commit"
+    status: INHERITED
+
+  controller_clock_ratio:
+    value: 1
+    source: "AttAcc attacc_bank.yaml at frozen commit"
+    status: INHERITED
+
+  refresh_policy:
+    value: AllBankHBM3
+    source: "AttAcc attacc_bank.yaml at frozen commit"
+    status: INHERITED

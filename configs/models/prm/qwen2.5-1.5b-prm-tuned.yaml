@@ -1,0 +1,20 @@
+schema_version: 1
+name: Qwen2.5-1.5B-PRM-Tuned
+family: qwen2
+role: prm
+source:
+  repository: "ORCHES paper checkpoint; base architecture Qwen/Qwen2.5-1.5B-Instruct"
+  revision: paper-checkpoint-not-disclosed
+  status: ASSUMED
+  note: "Shape inherits the 1.5B base; exact tuned checkpoint revision is unavailable."
+architecture:
+  hidden_size: 1536
+  intermediate_size: 8960
+  num_hidden_layers: 28
+  num_attention_heads: 12
+  num_key_value_heads: 2
+  head_dim: 128
+  vocab_size: 151936
+  max_position_embeddings: 32768
+  bytes_per_element: 2
+  tie_word_embeddings: true

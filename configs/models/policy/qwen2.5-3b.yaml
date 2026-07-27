@@ -1,0 +1,20 @@
+schema_version: 1
+name: Qwen2.5-3B-Instruct
+family: qwen2
+role: policy
+source:
+  repository: Qwen/Qwen2.5-3B-Instruct
+  revision: aa8e72537993ba99e69dfaafa59ed015b17504d1
+  status: INHERITED
+  note: "Architecture fields copied from the official config.json."
+architecture:
+  hidden_size: 2048
+  intermediate_size: 11008
+  num_hidden_layers: 36
+  num_attention_heads: 16
+  num_key_value_heads: 2
+  head_dim: 128
+  vocab_size: 151936
+  max_position_embeddings: 32768
+  bytes_per_element: 2
+  tie_word_embeddings: true

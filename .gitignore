@@ -1,0 +1,34 @@
+# Python and UV
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Native builds
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.so
+*.a
+*.o
+
+# Reproducible third-party checkouts are described by third_party.lock.
+third_party/
+
+# Generated experiment data. Keep manifests and documentation in Git.
+artifacts/traces/
+artifacts/raw/
+artifacts/processed/
+artifacts/figures/
+*.trace
+*.log
+
+# Local editor and operating-system files
+.idea/
+.vscode/
+.DS_Store

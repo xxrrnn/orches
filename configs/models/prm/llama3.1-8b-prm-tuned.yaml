@@ -1,0 +1,20 @@
+schema_version: 1
+name: Llama3.1-8B-PRM-Tuned
+family: llama
+role: prm
+source:
+  repository: RLHFlow/Llama3.1-8B-PRM-Mistral-Data
+  revision: 0a4c93ad67513db6f2a22005c9271e2b71632c4a
+  status: ASSUMED
+  note: "Public PRM architecture proxy; ORCHES exact tuned checkpoint is not disclosed."
+architecture:
+  hidden_size: 4096
+  intermediate_size: 14336
+  num_hidden_layers: 32
+  num_attention_heads: 32
+  num_key_value_heads: 8
+  head_dim: 128
+  vocab_size: 128256
+  max_position_embeddings: 131072
+  bytes_per_element: 2
+  tie_word_embeddings: false

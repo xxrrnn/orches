@@ -1,0 +1,40 @@
+schema_version: 1
+name: agx_orin_32gb
+kind: gpu
+
+gpu:
+  memory_capacity_gb:
+    value: 32.0
+    source: "ORCHES Sec. 5.1"
+    status: PAPER
+    note: "The paper identifies the 32 GB Jetson AGX Orin as the GPU baseline."
+
+  memory_bandwidth_gb_per_s:
+    value: 204.8
+    source: "ORCHES Sec. 5.1"
+    status: PAPER
+    note: "This is the SoC-visible bandwidth, not PIM internal bank bandwidth."
+
+  cuda_cores:
+    value: 1792
+    source: "NVIDIA Jetson AGX Orin Series Technical Brief v1.2, Table 1, 32 GB module"
+    status: INHERITED
+    note: "An external device specification; ORCHES does not restate this count."
+
+  tensor_cores:
+    value: 56
+    source: "NVIDIA Jetson AGX Orin Series Technical Brief v1.2, Table 1, 32 GB module"
+    status: INHERITED
+    note: "An external device specification; ORCHES does not restate this count."
+
+  max_gpu_frequency_mhz:
+    value: 930.0
+    source: "NVIDIA Jetson AGX Orin Series Technical Brief v1.2, Table 1, 32 GB module"
+    status: INHERITED
+    note: "A peak bound only; M2 must calibrate effective compute throughput."
+
+  soc_bandwidth_scales:
+    value: [1.0, 0.75, 0.5]
+    source: "ORCHES Fig. 11 and Sec. 5.1"
+    status: PAPER
+    note: "Bandwidth sensitivity changes bandwidth only, not compute capability."

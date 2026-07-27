@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "m2_pim_smoke",
+  "recorded_at": "2026-07-27",
+  "evaluation_eligible": false,
+  "command": "uv run orches pim-microbench /tmp/orches-pim-m2 --json",
+  "host": {
+    "kernel": "Linux 6.6.87.2-microsoft-standard-WSL2 x86_64",
+    "cpu": "AMD Ryzen 9 9950X 16-Core Processor",
+    "target_gpu_available": false
+  },
+  "inputs": {
+    "hardware_config": "configs/hardware/orches_pim_32gb.yaml",
+    "hardware_config_sha256": "3a12f351773ee3e268f2b2edfe58c95c102f1ba3f05261ace828ebe7c9eecc84",
+    "attacc_commit": "c60005143a6b492d7ef83231723386478b59a506",
+    "ramulator_build_base": "b7c70275f04126c647edb989270cc429776955d1",
+    "ramulator_executable_sha256": "bdbd72b06b0fcf5c1333a57f62f312fd54929544ffc8daafa2e2117f9518db75",
+    "generated_trace_sha256": "d35b5884c18a2382849bab10d0552b778b358a4f9eaa06623962e7e1451e1765",
+    "generated_ramulator_yaml_sha256": "e174696623846a0a94313148bcc4e2088244dcefe219b98a375855bcc340b094"
+  },
+  "configuration": {
+    "channels": 32,
+    "organization": "HBM3_8Gb_2R",
+    "timing": "HBM3_5.2Gbps",
+    "mac_rounds": 1,
+    "command_count": 224
+  },
+  "result": {
+    "memory_system_cycles": 22,
+    "total_num_pim_write_to_gemv_buffer_requests": 32,
+    "total_num_pim_mac_all_bank_requests": 32,
+    "total_num_pim_move_to_softmax_buffer_requests": 32,
+    "total_num_pim_softmax_requests": 32
+  },
+  "interpretation": "Functional command-path smoke test only; not a calibrated throughput or paper result."
+}

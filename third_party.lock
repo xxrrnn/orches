@@ -1,0 +1,78 @@
+schema_version = 1
+recorded_at = "2026-07-27"
+
+[paper]
+title = "ORCHES: Orchestrated Test-Time-Compute-based LLM Reasoning on Collaborative GPU-PIM HEterogeneous System"
+venue = "MICRO 2025"
+doi = "10.1145/3725843.3756039"
+file = "Li et al. - 2025 - ORCHES Orchestrated Test-Time-Compute-based LLM Reasoning on Collaborative GPU-PIM HEterogeneous Sy.pdf"
+sha256 = "70ed78d476427f2fdf9c14fb735234af9d9e8e397a8f20c1d2d09e3d4106ac00"
+
+[toolchain]
+python = "3.10.12"
+uv = "0.11.29"
+cmake = "3.22.1"
+ninja = "1.10.1"
+clang = "14.0.0"
+gcc = "11.4.0"
+git = "2.34.1"
+git_lfs = "3.0.2"
+
+[[repository]]
+name = "AttAcc simulator"
+path = "third_party/attacc_simulator"
+url = "https://github.com/scale-snu/attacc_simulator.git"
+commit = "c60005143a6b492d7ef83231723386478b59a506"
+license = "MIT"
+role = "PIM timing, command, trace, and energy-model foundation"
+
+[[repository]]
+name = "AttAcc Ramulator2 gitlink"
+path = "third_party/attacc_simulator/ramulator2"
+url = "https://github.com/CMU-SAFARI/ramulator2.git"
+commit = "0eafaa4c3df7b333f8645f1249afa52390c89616"
+license = "MIT"
+role = "Revision recorded by the AttAcc parent repository"
+note = "This is provenance only; set_pim_ramulator.sh deliberately resets the build tree to the revision below."
+
+[[repository]]
+name = "AttAcc Ramulator2 build base"
+path = "third_party/attacc_simulator/ramulator2"
+url = "https://github.com/CMU-SAFARI/ramulator2.git"
+commit = "b7c70275f04126c647edb989270cc429776955d1"
+license = "MIT"
+role = "Actual Ramulator2 base used before applying AttAcc patches"
+patch_source = "third_party/attacc_simulator/pim_ramulator_src/patches"
+
+[[repository]]
+name = "Duplex LLMSimulator"
+path = "third_party/LLMSimulator"
+url = "https://github.com/scale-snu/LLMSimulator.git"
+commit = "419252761fbdb95b789778a02256d458a5537ec7"
+license = "MIT"
+role = "Duplex comparison baseline"
+
+[[repository]]
+name = "Duplex Ramulator2"
+path = "third_party/LLMSimulator/src/dram/ramulator2"
+url = "https://github.com/CMU-SAFARI/ramulator2.git"
+commit = "b5262869b24790e5ec62d9d9974fca9bbb4f54e0"
+license = "MIT"
+role = "Ramulator2 revision recorded by Duplex"
+
+[[repository]]
+name = "Compute-optimal TTS"
+path = "third_party/compute-optimal-tts"
+url = "https://github.com/RyanLiu112/compute-optimal-tts.git"
+commit = "0ee2578af1f8d6cac445c9c4c72780528bb94556"
+license = "MIT"
+role = "Text reasoning workload and trace source"
+
+[[repository]]
+name = "LLaVA-o1"
+path = "third_party/LLaVA-o1"
+url = "https://github.com/PKU-YuanGroup/LLaVA-o1.git"
+commit = "fe3c9304fb08168fa3ae35d3380732439a2d4a36"
+license = "UNVERIFIED"
+role = "Vision reasoning workload and trace source"
+note = "No license file was present in this checkout. Treat it as an external tool until redistribution rights are verified."
