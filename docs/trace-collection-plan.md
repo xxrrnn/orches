@@ -334,16 +334,18 @@ version, platform markers, and build options are part of each lock/manifest.
 Large model and dataset snapshots are external artifacts identified by commit
 or content hash.
 
-Planned CLI after collector implementation:
+Collector CLI design target:
 
 ```bash
 UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches probe-trace-host --output artifacts/manifests/host.json
 UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches collect-text-trace --config configs/workloads/math500.yaml
 UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches collect-vision-trace --config configs/workloads/mathvista.yaml
+UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-policy-trace artifacts/traces/policy.jsonl --manifest artifacts/manifests/policy.json --json
 UV_CACHE_DIR=/tmp/orches-uv-cache uv run orches validate-trace artifacts/traces/replay.jsonl --json
 ```
 
-These commands are design targets and are not implemented at this checkpoint.
+`validate-policy-trace` and its strict manifest binding are implemented in
+M4B.3. Host probing and both collection commands remain design targets.
 
 ## Artifact Contract
 
@@ -369,7 +371,8 @@ a documented determinism result.
    multi-selection semantics, and synthetic-only v1 migration.
 2. [Complete] Replay schema v2 with per-token generation, multi-parent KV,
    exact selection-verifier work, and ordered physical pruning.
-3. Add host probing and collection manifests.
+3. [Partial] Add the collection manifest contract and validation; host probing
+   remains.
 4. Implement the text trace sink and complete-tree export.
 5. Implement layer-10/final PRM scoring with architecture-specific tests.
 6. Run the 5070 Ti smallest-pair pilot.

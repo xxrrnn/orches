@@ -62,6 +62,17 @@ uv run orches validate-trace artifacts/traces/synthetic.jsonl --json
 Synthetic traces exercise replay and simulator code but are not valid paper
 evaluation inputs.
 
+Validate a collected generation-only policy trace and its reproducibility
+manifest:
+
+```bash
+uv run orches validate-policy-trace artifacts/traces/policy.jsonl \
+  --manifest artifacts/manifests/policy.json --json
+```
+
+Generation-only traces preserve exact policy token/KV control flow but remain
+ineligible for complete paper results until real verifier evidence is added.
+
 Validate a frozen model architecture and run the native PIM smoke benchmark:
 
 ```bash

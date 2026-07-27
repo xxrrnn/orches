@@ -24,8 +24,12 @@ from .workload import (
     QuestionLengthBucket,
     SyntheticTraceConfig,
     generate_synthetic_traces,
+    policy_trace_sha256,
+    read_policy_jsonl,
+    read_policy_manifest,
     read_jsonl,
     trace_sha256,
+    validate_policy_manifest,
     write_jsonl,
 )
 
@@ -64,6 +68,24 @@ def _parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Print a machine-readable trace summary.",
+    )
+
+    validate_policy_trace = commands.add_parser(
+        "validate-policy-trace",
+        help="Validate a generation-only exact-token policy trace.",
+    )
+    validate_policy_trace.add_argument(
+        "path", type=Path, help="Path to the policy trace JSONL file"
+    )
+    validate_policy_trace.add_argument(
+        "--manifest",
+        type=Path,
+        help="Also verify a collection manifest against the trace bytes.",
+    )
+    validate_policy_trace.add_argument(
+        "--json",
+        action="store_true",
+        help="Print a machine-readable policy trace summary.",
     )
 
     validate_model = commands.add_parser(
@@ -172,6 +194,55 @@ def _print_trace_summary(summary: dict[str, object]) -> None:
         print(f"  {key}: {summary[key]}")
 
 
+def _policy_trace_summary(
+    path: Path, manifest_path: Path | None
+) -> dict[str, object]:
+    traces = read_policy_jsonl(path)
+    summary: dict[str, object] = {
+        "path": str(path),
+        "sha256": policy_trace_sha256(path),
+        "schema_versions": sorted(
+            {trace.policy_trace_schema_version for trace in traces}
+        ),
+        "workload_scope": "generation_only",
+        "paper_eligible": False,
+        "generation_evaluation_eligible": all(
+            trace.generation_evaluation_eligible for trace in traces
+        ),
+        "collection_modes": sorted(
+            {trace.collection_mode.value for trace in traces}
+        ),
+        "dtypes": sorted({trace.dtype for trace in traces}),
+        "requests": len(traces),
+        "steps": sum(len(trace.steps) for trace in traces),
+        "generation_calls": sum(
+            len(step.generation_calls) for trace in traces for step in trace.steps
+        ),
+        "candidates": sum(trace.candidate_count for trace in traces),
+        "generated_tokens": sum(trace.generated_tokens for trace in traces),
+        "materialized_output_tokens": sum(
+            trace.materialized_output_tokens for trace in traces
+        ),
+        "source_kinds": sorted(
+            {trace.provenance.source_kind.value for trace in traces}
+        ),
+    }
+    if manifest_path is not None:
+        manifest = read_policy_manifest(manifest_path)
+        validate_policy_manifest(manifest, path, traces=traces)
+        summary["manifest"] = str(manifest_path)
+        summary["manifest_valid"] = True
+        summary["missing_evidence"] = list(manifest.missing_evidence)
+    return summary
+
+
+def _print_policy_trace_summary(summary: dict[str, object]) -> None:
+    print(f"valid policy trace: {summary['path']}")
+    for key, value in summary.items():
+        if key != "path":
+            print(f"  {key}: {value}")
+
+
 def _print_mapping_summary(title: str, summary: dict[str, object]) -> None:
     print(title)
     for key, value in summary.items():
@@ -202,6 +273,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 print(json.dumps(summary, indent=2, sort_keys=True))
             else:
                 _print_trace_summary(summary)
+            return 0
+        if args.command == "validate-policy-trace":
+            summary = _policy_trace_summary(args.path, args.manifest)
+            if args.json:
+                print(json.dumps(summary, indent=2, sort_keys=True))
+            else:
+                _print_policy_trace_summary(summary)
             return 0
         if args.command == "validate-model-config":
             summary = load_transformer_config(args.path).summary()

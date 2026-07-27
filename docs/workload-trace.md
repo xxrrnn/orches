@@ -2,16 +2,41 @@
 
 ## Scope
 
-The repository supports two deliberately separate schemas:
+The repository supports two complete-TTC schemas and one deliberately separate
+policy-collection schema:
 
-| Version | Purpose | Paper evaluation |
+| Contract | Purpose | Paper evaluation |
 |---|---|---|
-| v1 | Deterministic one-parent synthetic replay used by the existing simulator | Never eligible |
-| v2 | Exact-token, multi-beam, scalar/pairwise verifier, and logical-KV collection contract | Structurally eligible after real collection and manifest validation |
+| TTC v1 | Deterministic one-parent synthetic replay used by the existing simulator | Never eligible |
+| TTC v2 | Exact-token, multi-beam, scalar/pairwise verifier, and logical-KV collection contract | Structurally eligible after real collection and manifest validation |
+| Policy v1 | Exact policy generation calls without verifier internals | Generation-only comparison after opaque collection; never full-paper eligible |
 
 No real model trace has been collected yet. Schema v2 defines and validates the
 artifact that the compute-optimal-TTS and LLaVA-CoT collectors must produce; it
 does not manufacture model observations.
+
+## Generation-Only Policy Contract
+
+`policy_schema.py` records policy-model observations before PRM enrichment. One
+generation call contains one parent, exact submitted token tensor, reused KV,
+RNG seed/stream, and ordered candidates. Candidates retain exact returned IDs,
+logical token-ready order, actual output-KV materialization, terminal KV block,
+and finish reason.
+
+Three modes keep evidence strength explicit:
+
+| Mode | Decision source | Valid use |
+|---|---|---|
+| `single_step` | None | Collector/token/KV development |
+| `synthetic_selector` | Deterministic test selector | Multi-step simulator development |
+| `opaque_selector` | Upstream selector, bound by raw artifact SHA-256 | Generation-only comparison |
+
+Opaque means the collector preserves selected/pruned IDs but makes no claim
+about PRM scores, tensors, timing, or energy. `policy_manifest.py` binds the
+canonical JSONL to `uv.lock`, source/collector revisions, command, runtime GPU
+stack, and raw artifacts. `validate-policy-trace --manifest` validates that
+boundary. Enrichment later expands each call into TTC-v2 candidates and adds
+real verifier calls; TTC-v2 validation is not relaxed in the meantime.
 
 Both versions exclude prompt text, generated text, reference answers, and
 correctness. Correctness belongs in a separate evaluation record keyed by

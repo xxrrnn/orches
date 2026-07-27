@@ -250,10 +250,11 @@ orches/
 
 ### Phase 2：构建 TTC workload trace
 
-状态：schema v2 已实现 exact token/mask、逻辑 KV block lineage、`search_width` 与
+状态：generation-only policy schema/manifest 和完整 TTC schema v2 已实现 exact token/mask、逻辑 KV block lineage、`search_width` 与
 `beam_size` 分离、scalar PRM/pairwise judge 和有序 selection events；v2 replay 已按实际
 generated-token round、materialized KV、多 parent lineage 和 verifier/selection 顺序接入
-T1/T2/T3。真实 pipeline collector 尚未实现，因此目前没有 evaluation trace，也不能产出
+T1/T2/T3。policy contract 支持 single-step、synthetic selector 和绑定原始 artifact hash 的
+opaque selector，但真实 pipeline collector 尚未实现，因此目前没有 evaluation trace，也不能产出
 论文数值对齐结论。
 
 实现：
@@ -492,7 +493,7 @@ fragmentation/compaction difference
 
 | 论文位置 | 论文机制 | 计划实现 |
 |---|---|---|
-| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `workload/schema_v2.py`, `replay_v2.py`；`collector.py` 待实现 |
+| Sec. 2.2, Fig. 3 | generation/verification TTC tree | `workload/policy_schema.py`, `policy_manifest.py`, `schema_v2.py`, `replay_v2.py`；source integration 待实现 |
 | Sec. 3.1, Fig. 4-5 | variable parallelism、shared/unique KV | `models/operators.py`, `scheduler/roofline.py` |
 | Sec. 3.2, Fig. 6 | branch dependency 和相互等待 | `sim/event.py`, `predictor/pipeline.py` |
 | Sec. 3.3 | pruning 产生 fragmentation | `memory/allocator.py`, `replay_v2.py` ordered pruning |

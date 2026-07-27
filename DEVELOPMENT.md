@@ -14,7 +14,7 @@ files, tests, and raw result manifests.
 | M1 | Hardware contract and configuration validation | Complete | 14 tests; validated GPU/PIM configs; bootstrap audit |
 | M2 | TTC traces, GPU baseline, PIM microbenchmarks | In progress (M2B schema complete) | Exact-token/KV schema complete; real collectors and GPU runner pending |
 | M3 | ORCHES Techniques 1, 2, and 3 | Complete (functional) | 105 tests; request replay; calibration/evaluation pending |
-| M4 | Baselines, energy, area, utilization | In progress (M4B.2 complete) | 141 tests; exact-token replay/contracts/accounting complete; collectors/launchers pending |
+| M4 | Baselines, energy, area, utilization | In progress (M4B.3 complete) | 149 tests; generation-only collection contract/manifest complete; real collector and launchers pending |
 | M5 | Paper evaluation and deviation report | Not started | - |
 
 ## Commit Policy
@@ -1010,6 +1010,111 @@ validation. It is not RTL, cycle-accurate end-to-end GPU execution, or measured
 ORCHES silicon. Quantitative alignment still requires real traces, frozen
 `paper_method` rates, executable baselines, and the M5 deviation report.
 
+### M4B.3 Implementation Checkpoint: Generation-Only Collection Contract
+
+#### Scope
+
+This checkpoint creates the durable intermediate artifact needed to instrument
+policy generation before implementing PRM internals. It deliberately does not
+weaken schema v2's requirement for real verifier calls and does not insert fake
+scores, token tensors, or activity. Every policy trace serializes
+`workload_scope=generation_only` and `paper_eligible=false` so it cannot be
+loaded accidentally as a complete TTC evaluation trace.
+
+No model was executed in this checkpoint. The repository still has no real
+MATH-500 or LiveCodeBench trace; M4B.3 defines and verifies what the next
+collector must emit.
+
+#### Implementation Sequence
+
+1. Added `PolicyRequestTrace` as a separately versioned exact-token contract.
+   Request metadata freezes policy/tokenizer/engine/collector revisions,
+   sampling, seed, dtype, width, beam, and collection mode without requiring a
+   PRM model identity.
+2. Represented one inference-engine invocation as
+   `PolicyGenerationCallTrace`: one parent, exact submitted input tensor,
+   reused-KV count, RNG seed/stream identity, and ordered returned candidates.
+   This matches vLLM's call boundary and avoids duplicating one input tensor for
+   every candidate.
+3. Recorded exact generated token IDs, request-global logical token-ready order,
+   separate output-KV materialization, terminal KV block, and finish reason for
+   every candidate. Character counts and reconstructed token lengths are not
+   fields and strict parsing rejects them.
+4. Added `single_step`, `synthetic_selector`, and `opaque_selector` collection
+   modes. An opaque decision records only selected/pruned IDs and a raw-artifact
+   SHA-256; it preserves the real policy tree while explicitly omitting the
+   verifier's scores, tensors, and activity.
+5. Reused schema-v2 token tensor and append-only KV block types. Cross-request
+   validation reconstructs every parent prefix and KV extension, enforces one
+   generation call per retained parent, and supports any `beam_size` rather
+   than assuming width equals retained branch count.
+6. Added canonical compact ASCII JSONL with atomic replacement, unique request
+   IDs, one collection mode, and one provenance per file. Re-serializing a
+   parsed artifact is byte-identical.
+7. Added a deterministic collection manifest that binds trace bytes and request
+   order to `uv.lock`, collector/source revisions, command arguments, runtime
+   Python/platform/GPU/driver/CUDA/torch identity, and revalidated raw artifact
+   hashes.
+8. Added `orches validate-policy-trace`, optionally with `--manifest`, to report
+   scope, eligibility, token/KV totals, provenance class, and hash validation.
+
+#### Token, KV, and Selection Invariants
+
+```text
+one generation call per root/selected parent
+candidates per call = search_width
+next input token prefix = exact parent input + generated token IDs
+reused KV = parent terminal KV lineage tokens
+KV extension = input model positions + materialized output - reused KV
+token_ready_indices = request-global contiguous logical order
+opaque decision hash is present in manifest.raw_artifacts
+```
+
+`materialized_output_tokens` remains independent from generated-token count.
+This handles the common decode boundary where the final sampled token has been
+returned but has not yet produced K/V. Added step-prompt tokens are also handled:
+they appear in the next exact input and therefore enter the newly materialized
+KV extension instead of being inferred from text.
+
+#### Reproducibility and Eligibility
+
+The trace itself contains deterministic model-control inputs and exact observed
+outputs. The manifest supplies the environment boundary. A collected
+`opaque_selector` trace is eligible for a labeled generation-only comparison;
+`single_step` and `synthetic_selector` traces are development evidence only.
+All modes remain ineligible for the paper's complete end-to-end results until
+`verifier_activity`, `verifier_scores`, and `verifier_token_tensors` are added
+through schema-v2 enrichment.
+
+The manifest validates content, not path location: artifacts can be moved to a
+server while their hashes, request order, source identities, and command remain
+stable. Every opaque decision digest must correspond to a retained raw artifact;
+a sanitized trace cannot make an unsupported branch choice paper-facing.
+
+#### Paper Correspondence
+
+| M4B.3 evidence | Paper relationship |
+|---|---|
+| Exact policy inputs/outputs and RNG stream | Sec. 2.2 generation workload and reproducible Sec. 5.1 inputs |
+| Width per selected parent and ordered returned candidates | Sec. 3.1 variable generation parallelism |
+| Actual parent tokens and materialized KV lineage | Sec. 3.2 dependencies and Sec. 3.3/T3 lifetime input |
+| Opaque selected/pruned IDs with raw digest | Preserves upstream TTC control flow without claiming PRM implementation |
+| Explicit generation-only eligibility | Prevents partial evidence from being normalized as Fig. 11/Table 6 |
+
+#### Verification
+
+Eight focused tests cover byte-stable round trips, exact two-step token/KV
+lineage, parent-prefix corruption, incorrect KV-extension rejection, character
+count rejection, mandatory opaque-decision hashes, manifest lock/runtime/raw
+artifact binding, changed-trace hash rejection, and CLI manifest validation.
+The complete repository suite passes 149 tests; `compileall` and
+`git diff --check` also pass.
+
+The next checkpoint is the source-independent event sink plus the thin
+compute-optimal-TTS integration. It must first emit raw policy events, then
+construct this validated trace and manifest on the RTX 5070 Ti. PRM enrichment
+remains a later checkpoint.
+
 ## Change Log
 
 | Date | Milestone | Change |
@@ -1022,3 +1127,4 @@ ORCHES silicon. Quantitative alignment still requires real traces, frozen
 | 2026-07-27 | M4B design | Audited AttAcc/Duplex GPU models and both workload sources; separated paper-method timing from optional Orin calibration and froze the 5070 Ti/server trace-collection plan. |
 | 2026-07-27 | M4B.1 | Implemented schema v2 exact-token tensors, logical KV lineage, multi-beam selection, scalar/pairwise verifiers, strict versioned I/O, and synthetic-only migration; 135 tests pass. |
 | 2026-07-27 | M4B.2 | Connected schema v2 to per-token ORCHES replay with multi-parent KV, exact verifier calls, ordered pruning, and phase-complete activity accounting; 141 tests pass, while real collection remains pending. |
+| 2026-07-27 | M4B.3 | Added a separately versioned generation-only policy trace, exact call/RNG/token/KV semantics, opaque/synthetic selection modes, reproducibility manifests, and strict CLI validation; 149 tests pass, while no real trace has yet been collected. |
