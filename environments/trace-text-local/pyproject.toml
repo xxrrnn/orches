@@ -1,0 +1,46 @@
+[project]
+name = "orches-trace-text-local"
+version = "0.1.0"
+description = "RTX 5070 Ti runtime for collecting ORCHES text policy traces"
+requires-python = "==3.10.*"
+dependencies = [
+    "accelerate==1.7.0",
+    "dm-tree==0.1.9",
+    "fschat[model-worker,webui]==0.2.36",
+    "jsonlines==4.0.0",
+    "latex2sympy2",
+    "loguru==0.7.3",
+    "numpy>=1.26.4,<2",
+    "pylatexenc==2.10",
+    "ray[cgraph,default]==2.43.0",
+    "regex>=2024.11.6",
+    "scipy>=1.14.1,<1.16",
+    "setproctitle==1.3.6",
+    "setuptools-scm>=8.1.0,<9",
+    "timeout-decorator==0.5.0",
+    "torch==2.7.0",
+    "torchaudio==2.7.0",
+    "torchvision==0.22.0",
+    "transformers==4.52.4",
+    "typing-extensions>=4.12.2,<5",
+    "vllm==0.9.1",
+    "word2number==1.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+latex2sympy2 = {
+    path = "../../third_party/compute-optimal-tts/src/envs/MATH/latex2sympy",
+    editable = true,
+}
+torch = { index = "pytorch-cu128" }
+torchaudio = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
