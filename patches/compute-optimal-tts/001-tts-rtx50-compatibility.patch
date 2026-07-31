@@ -1,0 +1,145 @@
+diff --git a/src/reason/evaluation/evaluate.py b/src/reason/evaluation/evaluate.py
+index b608657..ab499b9 100644
+--- a/src/reason/evaluation/evaluate.py
++++ b/src/reason/evaluation/evaluate.py
+@@ -135,7 +135,9 @@ if __name__ == "__main__":
+     if args.local:
+         print("run in pure local mode for debug only")
+         args.num_worker = 1
+-        ray.init(local_mode=True)
++        # WSL may select a VPN route for Ray's local head unless it is pinned.
++        local_ray_ip = os.environ.get("ORCHES_RAY_LOCAL_IP", "127.0.0.1")
++        ray.init(local_mode=True, _node_ip_address=local_ray_ip)
+     else:
+         ray.init()
+
+diff --git a/src/reason/llm_service/workers/reward_model_worker.py b/src/reason/llm_service/workers/reward_model_worker.py
+index f0e55b8..df09cb4 100644
+--- a/src/reason/llm_service/workers/reward_model_worker.py
++++ b/src/reason/llm_service/workers/reward_model_worker.py
+@@ -14,6 +14,7 @@ import time
+ import torch
+ import torch.nn.functional as F
+ from transformers import set_seed, AutoTokenizer, AutoModelForCausalLM, AutoModel
++import transformers.modeling_utils as modeling_utils
+ from safetensors import safe_open
+ import uvicorn
+
+@@ -42,6 +43,23 @@ time_str = time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))[2:]
+ logger = build_logger("reward_model_worker", f"rm_{time_str}.log")
+
+
++def enable_mmap_legacy_checkpoint_loader() -> None:
++    """Use mmap for legacy `.bin` files while preserving safetensors handling."""
++    original_load_state_dict = modeling_utils.load_state_dict
++
++    def load_state_dict(checkpoint_file, is_quantized=False, map_location="cpu", weights_only=True):
++        if str(checkpoint_file).endswith(".bin"):
++            return torch.load(checkpoint_file, map_location=map_location, weights_only=weights_only, mmap=True)
++        return original_load_state_dict(
++            checkpoint_file,
++            is_quantized=is_quantized,
++            map_location=map_location,
++            weights_only=weights_only,
++        )
++
++    modeling_utils.load_state_dict = load_state_dict
++
++
+ class ModelWorker(BaseModelWorker):
+     def __init__(
+         self,
+@@ -87,6 +105,7 @@ class ModelWorker(BaseModelWorker):
+             from reason.llm_service.workers.skywork_o1_prm_inference.prm_model import PRM_MODEL
+
+             self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
++            enable_mmap_legacy_checkpoint_loader()
+             self.model = PRM_MODEL.from_pretrained(model_path, trust_remote_code=True, device_map=device).eval()
+             prm_step_tag = '\n'
+             step_tag_id = self.tokenizer.encode(prm_step_tag)[-1]
+diff --git a/src/reason/llm_service/workers/skywork_o1_prm_inference/modeling_base.py b/src/reason/llm_service/workers/skywork_o1_prm_inference/modeling_base.py
+index 9107f61..2f492b3 100644
+--- a/src/reason/llm_service/workers/skywork_o1_prm_inference/modeling_base.py
++++ b/src/reason/llm_service/workers/skywork_o1_prm_inference/modeling_base.py
+@@ -14,6 +14,7 @@
+ import json
+ import logging
+ import os
++from functools import partial
+ from copy import deepcopy
+ from typing import Optional
+ import sys
+@@ -90,7 +91,8 @@ class PreTrainedModelWrapper(nn.Module):
+         self.pretrained_model = pretrained_model
+
+         self.config = pretrained_model.config
+-        self.prepare_inputs_for_generation = pretrained_model.prepare_inputs_for_generation
++        if hasattr(pretrained_model, "prepare_inputs_for_generation"):
++            self.prepare_inputs_for_generation = pretrained_model.prepare_inputs_for_generation
+         self.is_loaded_in_8bit = getattr(pretrained_model, "is_loaded_in_8bit", False)
+         self.is_loaded_in_4bit = getattr(pretrained_model, "is_loaded_in_4bit", False)
+         self.is_sequential_parallel = False
+@@ -214,6 +216,7 @@ class PreTrainedModelWrapper(nn.Module):
+         # state_dict is removed from the model after loading it.
+         is_resuming_training = True
+         if isinstance(pretrained_model_name_or_path, str):
++            is_resuming_training = True
+             safe_filename = os.path.join(pretrained_model_name_or_path, "model.safetensors")
+             filename = os.path.join(pretrained_model_name_or_path, "pytorch_model.bin")
+
+@@ -244,7 +247,7 @@ class PreTrainedModelWrapper(nn.Module):
+                 else:
+                     use_safe = False
+
+-            loading_func = safe_load_file if use_safe else torch.load
++            loading_func = safe_load_file if use_safe else partial(torch.load, mmap=True)
+             load_kwargs = {} if use_safe else {"map_location": "cpu"}
+
+             if is_resuming_training:
+diff --git a/src/reason/llm_service/workers/vllm_worker.py b/src/reason/llm_service/workers/vllm_worker.py
+index e773ab8..6cdaeda 100644
+--- a/src/reason/llm_service/workers/vllm_worker.py
++++ b/src/reason/llm_service/workers/vllm_worker.py
+@@ -4,11 +4,24 @@ This file is largely borrowed from FastChat (https://github.com/lm-sys/FastChat)
+
+ import argparse
+ import asyncio
++import sys
+ import json
+ import time
+ from typing import List
+ import uuid
+
++
++if sys.version_info < (3, 13):
++    _add_argument = argparse._ActionsContainer.add_argument
++
++    def _add_argument_without_deprecated(self, *args, **kwargs):
++        """Ignore vLLM's Python 3.13-only argparse metadata on Python 3.10."""
++        kwargs.pop("deprecated", None)
++        return _add_argument(self, *args, **kwargs)
++
++    argparse._ActionsContainer.add_argument = _add_argument_without_deprecated
++
++
+ from fastapi import FastAPI, Request, BackgroundTasks
+ from fastapi.responses import StreamingResponse, JSONResponse
+ import uvicorn
+@@ -52,8 +65,15 @@ class VLLMWorker(BaseModelWorker):
+         )
+
+         logger.info(f"Loading the model {self.model_names} on worker {worker_id}, worker type: vLLM worker...")
+-        self.tokenizer = llm_engine.engine.tokenizer.tokenizer
+-        self.context_len = get_context_length(llm_engine.engine.model_config.hf_config)
++        if hasattr(llm_engine, "engine"):
++            # vLLM 0.6.x exposes the synchronous engine wrapper.
++            self.tokenizer = llm_engine.engine.tokenizer.tokenizer
++            model_config = llm_engine.engine.model_config
++        else:
++            # vLLM 0.9.x returns AsyncLLM directly.
++            self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
++            model_config = llm_engine.model_config
++        self.context_len = get_context_length(model_config.hf_config)
+
+         if not no_register:
+             self.init_heart_beat()

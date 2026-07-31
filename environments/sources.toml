@@ -1,0 +1,9 @@
+[compute_optimal_tts]
+repository = "https://github.com/RyanLiu112/compute-optimal-tts.git"
+revision = "0ee2578af1f8d6cac445c9c4c72780528bb94556"
+path = "third_party/compute-optimal-tts"
+
+[llava_cot]
+repository = "https://github.com/PKU-YuanGroup/LLaVA-CoT.git"
+revision = "081cc3fe3670fbff7b30fa22cbcafe031a2077bc"
+path = "third_party/LLaVA-CoT"
