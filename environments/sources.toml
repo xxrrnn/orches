@@ -7,3 +7,8 @@ path = "third_party/compute-optimal-tts"
 repository = "https://github.com/PKU-YuanGroup/LLaVA-CoT.git"
 revision = "081cc3fe3670fbff7b30fa22cbcafe031a2077bc"
 path = "third_party/LLaVA-CoT"
+
+[vllm]
+repository = "https://github.com/vllm-project/vllm.git"
+revision = "b6553be1bc75f046b00046a4ad7576364d03c835"
+path = "third_party/vllm"
