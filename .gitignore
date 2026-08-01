@@ -2,6 +2,7 @@
 **/.venv/
 __pycache__/
 .pytest_cache/
+.cache/
 artifacts/
 models/
 third_party/
