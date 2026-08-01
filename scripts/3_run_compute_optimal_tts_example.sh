@@ -30,12 +30,17 @@ MAX_NEW_TOKENS="${TTS_MAX_NEW_TOKENS:-1024}"
 POLICY_GPU_MEMORY_UTILIZATION="${TTS_POLICY_GPU_MEMORY_UTILIZATION:-0.88}"
 TTS_TEMPERATURE="${TTS_TEMPERATURE:-0.7}"
 TTS_SEED="${TTS_SEED:-0}"
+TTS_STRICT_DETERMINISM="${TTS_STRICT_DETERMINISM:-1}"
+TTS_POLICY_MAX_CONCURRENCY="${TTS_POLICY_MAX_CONCURRENCY:-1}"
+TTS_PRM_MAX_CONCURRENCY="${TTS_PRM_MAX_CONCURRENCY:-1}"
 TTS_RUN_ID="${TTS_RUN_ID:-}"
 TTS_LOCAL="${TTS_LOCAL:-1}"
 TTS_TASK_NAME="${TTS_TASK_NAME:-AIME24}"
 TTS_BEAM_SIZE="${TTS_BEAM_SIZE:-2}"
 TTS_TREE_MAX_WIDTH="${TTS_TREE_MAX_WIDTH:-4}"
 TTS_TREE_MAX_DEPTH="${TTS_TREE_MAX_DEPTH:-4}"
+TTS_VERIFY_DETERMINISM="${TTS_VERIFY_DETERMINISM:-1}"
+TTS_DETERMINISM_FIXTURE="${TTS_DETERMINISM_FIXTURE:-$ROOT_DIR/traces/Qwen0.5/Skywork-1.5B/AIME24/b2/w4/sw/problem_0000.json}"
 
 SAVE_BASE_DIR="${TTS_SAVE_BASE_DIR:-/tmp/orches-tts-runs}"
 TRACE_BASE_DIR="${TTS_TRACE_BASE_DIR:-$ROOT_DIR/traces}"
@@ -64,8 +69,14 @@ export HF_HOME
 export HF_HUB_CACHE
 export HF_ENDPOINT
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export PYTHONHASHSEED="${PYTHONHASHSEED:-$TTS_SEED}"
+export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
+export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
+export NVIDIA_TF32_OVERRIDE="${NVIDIA_TF32_OVERRIDE:-0}"
+export ORCHES_TTS_SEED="$TTS_SEED"
+export ORCHES_TTS_STRICT_DETERMINISM="$TTS_STRICT_DETERMINISM"
 export ORCHES_TTS_SOURCE_REVISION="${ORCHES_TTS_SOURCE_REVISION:-0ee2578af1f8d6cac445c9c4c72780528bb94556}"
-export ORCHES_TTS_PATCH_SERIES="${ORCHES_TTS_PATCH_SERIES:-001-tts-rtx50-compatibility,002-tts-baseline-tracing,003-vllm-multisample-aggregation,004-compact-output-token-text,005-reward-score-alias,006-software-candidate-token-lengths}"
+export ORCHES_TTS_PATCH_SERIES="${ORCHES_TTS_PATCH_SERIES:-001-tts-rtx50-compatibility,002-tts-baseline-tracing,003-vllm-multisample-aggregation,004-compact-output-token-text,005-reward-score-alias,006-software-candidate-token-lengths,007-tts-strict-determinism}"
 export ORCHES_RAY_LOCAL_IP="${ORCHES_RAY_LOCAL_IP:-127.0.0.1}"
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost,0.0.0.0"
 export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost,0.0.0.0"
@@ -114,6 +125,18 @@ validate_beam_configuration() {
     }
 }
 
+verify_determinism() {
+    [[ "$TTS_STRICT_DETERMINISM" == "1" ]] || return 0
+    [[ -f "$TTS_DETERMINISM_FIXTURE" ]] || {
+        printf 'error: determinism fixture is missing: %s\n' "$TTS_DETERMINISM_FIXTURE" >&2
+        exit 1
+    }
+    "$PYTHON" "$ROOT_DIR/scripts/5_verify_tts_determinism.py" \
+        --fixture "$TTS_DETERMINISM_FIXTURE" \
+        --policy-address "http://$HOST_ADDR:$POLICY_PORT" \
+        --prm-address "http://$HOST_ADDR:$PRM_PORT"
+}
+
 if [[ "$COMMAND" == "controller" ]]; then
     cd "$SOURCE_DIR"
     exec "$PYTHON" -m fastchat.serve.controller \
@@ -132,6 +155,7 @@ if [[ "$COMMAND" == "policy-worker" ]]; then
     exec "$PYTHON" -m reason.llm_service.workers.vllm_worker \
         --max_model_length "$MAX_MODEL_LENGTH" \
         --gpu_memory_utilization "$POLICY_GPU_MEMORY_UTILIZATION" \
+        --limit-worker-concurrency "$TTS_POLICY_MAX_CONCURRENCY" \
         --swap_space 16 \
         --model-path "$POLICY_MODEL" \
         --controller-address "http://$HOST_ADDR:$CONTROLLER_PORT" \
@@ -145,6 +169,8 @@ if [[ "$COMMAND" == "prm-worker" ]]; then
     export CUDA_VISIBLE_DEVICES="$PRM_GPU"
     exec "$PYTHON" -m reason.llm_service.workers.reward_model_worker \
         --model-path "$PRM_MODEL" \
+        --limit-worker-concurrency "$TTS_PRM_MAX_CONCURRENCY" \
+        --seed "$TTS_SEED" \
         --controller-address "http://$HOST_ADDR:$CONTROLLER_PORT" \
         --host "$HOST_ADDR" \
         --port "$PRM_PORT" \
@@ -161,7 +187,7 @@ if [[ "$COMMAND" == "start-cot" || "$COMMAND" == "start-beam" ]]; then
     tmux set-environment -g TTS_PRM_GPU "$PRM_GPU"
     tmux set-environment -g TTS_POLICY_GPU_MEMORY_UTILIZATION "$POLICY_GPU_MEMORY_UTILIZATION"
     tmux set-environment -g TTS_MAX_MODEL_LENGTH "$MAX_MODEL_LENGTH"
-    for variable_name in HF_HOME HF_HUB_CACHE HF_ENDPOINT HF_HUB_OFFLINE ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES; do
+    for variable_name in TTS_SEED TTS_STRICT_DETERMINISM TTS_POLICY_MAX_CONCURRENCY TTS_PRM_MAX_CONCURRENCY HF_HOME HF_HUB_CACHE HF_ENDPOINT HF_HUB_OFFLINE PYTHONHASHSEED CUBLAS_WORKSPACE_CONFIG CUDA_DEVICE_MAX_CONNECTIONS NVIDIA_TF32_OVERRIDE ORCHES_TTS_SEED ORCHES_TTS_STRICT_DETERMINISM ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES; do
         tmux set-environment -g "$variable_name" "${!variable_name}"
     done
     tmux has-session -t tts-controller 2>/dev/null ||
@@ -188,6 +214,7 @@ if [[ "$COMMAND" == "start-cot" || "$COMMAND" == "start-beam" ]]; then
 fi
 
 if [[ "$COMMAND" == "run-cot" || "$COMMAND" == "cot" ]]; then
+    [[ "$TTS_VERIFY_DETERMINISM" == "1" ]] && verify_determinism
     prepare_trace_run
     cd "$SOURCE_DIR"
     exec "$PYTHON" reason/evaluation/evaluate.py \
@@ -214,6 +241,7 @@ if [[ "$COMMAND" == "run-cot" || "$COMMAND" == "cot" ]]; then
 fi
 
 if [[ "$COMMAND" == "run-beam" || "$COMMAND" == "beam" ]]; then
+    [[ "$TTS_VERIFY_DETERMINISM" == "1" ]] && verify_determinism
     prepare_trace_run
     validate_beam_configuration
     cd "$SOURCE_DIR"
@@ -238,6 +266,11 @@ if [[ "$COMMAND" == "run-beam" || "$COMMAND" == "beam" ]]; then
         --batch_size 1 \
         --max_time 1 \
         --local "$TTS_LOCAL"
+fi
+
+if [[ "$COMMAND" == "verify-determinism" ]]; then
+    verify_determinism
+    exit 0
 fi
 
 if [[ "$COMMAND" == "status" ]]; then

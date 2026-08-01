@@ -3,6 +3,7 @@
 #
 # Usage:
 #   bash scripts/4_generate_qwen05_skywork_trace.sh start
+#   bash scripts/4_generate_qwen05_skywork_trace.sh verify
 #   bash scripts/4_generate_qwen05_skywork_trace.sh status
 #   bash scripts/4_generate_qwen05_skywork_trace.sh run
 #   bash scripts/4_generate_qwen05_skywork_trace.sh stop
@@ -55,12 +56,13 @@ export TTS_RUN_ID="${TTS_RUN_ID:-$POLICY_LABEL/$PRM_LABEL/$TASK_NAME/b$BEAM_SIZE
 
 case "$COMMAND" in
     start) exec bash "$RUNNER" start-beam ;;
+    verify) exec bash "$RUNNER" verify-determinism ;;
     run) exec bash "$RUNNER" run-beam ;;
     status) exec bash "$RUNNER" status ;;
     logs) exec bash "$RUNNER" logs ;;
     stop) exec bash "$RUNNER" stop ;;
     *)
-        printf 'usage: %s {start|run|status|logs|stop}\n' "${BASH_SOURCE[0]}" >&2
+        printf 'usage: %s {start|verify|run|status|logs|stop}\n' "${BASH_SOURCE[0]}" >&2
         exit 1
         ;;
 esac

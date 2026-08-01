@@ -26,6 +26,7 @@ readonly PATCH_FILES=(
     "$ROOT_DIR/patches/compute-optimal-tts/004-compact-output-token-text.patch"
     "$ROOT_DIR/patches/compute-optimal-tts/005-reward-score-alias.patch"
     "$ROOT_DIR/patches/compute-optimal-tts/006-software-candidate-token-lengths.patch"
+    "$ROOT_DIR/patches/compute-optimal-tts/007-tts-strict-determinism.patch"
 )
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -66,6 +67,12 @@ patch_is_applied() {
             ;;
         006-software-candidate-token-lengths.patch)
             rg -q '"token_length": int\(action.get\("num_token", 0\)\)' "$SOURCE_DIR/src/reason/tracing/tts_trace.py"
+            ;;
+        007-tts-strict-determinism.patch)
+            [[ -f "$SOURCE_DIR/src/reason/llm_service/workers/determinism.py" ]] &&
+                rg -q 'strict determinism requires a request seed' "$SOURCE_DIR/src/reason/llm_service/workers/vllm_worker.py" &&
+                rg -q 'attn_implementation' "$SOURCE_DIR/src/reason/llm_service/workers/reward_model_worker.py" &&
+                rg -q 'seed=args.seed' "$SOURCE_DIR/src/reason/evaluation/evaluate.py"
             ;;
         *) die "missing applied-state marker for patch: $1" ;;
     esac
