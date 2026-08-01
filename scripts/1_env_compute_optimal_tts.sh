@@ -2,12 +2,16 @@
 # Bootstrap the locked Compute-Optimal-TTS runtime and all paper-scale model pairs.
 set -Eeuo pipefail
 
-readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SOURCE_DIR="$ROOT_DIR/third_party/compute-optimal-tts"
 readonly TARGET="${TTS_TARGET:-rtx5090}"
 readonly ENV_DIR="$ROOT_DIR/environments/compute-optimal-tts/$TARGET"
-readonly PYTHON_BIN="${PYTHON_BIN:-python3.10}"
+readonly PYTHON_BIN="${PYTHON_BIN:-$(uv python find --managed-python 3.10)}"
 readonly HF_CACHE="${ORCHES_TTS_CACHE:-$HOME/.cache/huggingface/orches-tts}"
+readonly HF_BIN="$ENV_DIR/.venv/bin/hf"
+readonly VLLM_WHEEL_URL="${ORCHES_VLLM_WHEEL_URL:-https://github.com/xxrrnn/orches/releases/download/whl/vllm-0.9.1-cp310-cp310-linux_x86_64.whl}"
+readonly VLLM_WHEEL="$ROOT_DIR/artifacts/vllm-sm120/vllm-0.9.1-cp310-cp310-linux_x86_64.whl"
+readonly VLLM_WHEEL_SHA256="937bd9dbfaadaf816c2857c7ae0e1b73bfe805a0c43af030ceb034f4132da74a"
 # 1.5B + 1.5B and 7B + 1.5B both use the Skywork verifier.
 readonly QWEN_MATH_1_5B="Qwen/Qwen2.5-Math-1.5B-Instruct"
 readonly QWEN_MATH_7B="Qwen/Qwen2.5-Math-7B-Instruct"
@@ -16,72 +20,55 @@ readonly SKYWORK_PRM_1_5B="Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B"
 readonly MATH_SHEPHERD_PRM_7B="peiyi9979/math-shepherd-mistral-7b-prm"
 readonly SOURCE_REVISION="0ee2578af1f8d6cac445c9c4c72780528bb94556"
 readonly PATCH_FILE="$ROOT_DIR/patches/compute-optimal-tts/001-tts-rtx50-compatibility.patch"
-readonly VLLM_SOURCE_DIR="$ROOT_DIR/third_party/vllm"
-readonly VLLM_REVISION="b6553be1bc75f046b00046a4ad7576364d03c835"
-readonly CUDA_HOME="${ORCHES_CUDA_HOME:-$HOME/.local/cuda-12.8}"
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
-download_model() {
-    local model_id="$1"
-    printf 'Downloading %s into %s\n' "$model_id" "$HF_HOME"
-    TTS_MODEL_ID="$model_id" "$ENV_DIR/.venv/bin/python" -c 'from huggingface_hub import snapshot_download; import os; snapshot_download(repo_id=os.environ["TTS_MODEL_ID"], cache_dir=os.environ["HF_HOME"])'
-}
-
-ensure_source() {
-    if [[ ! -d "$SOURCE_DIR/.git" ]]; then
-        mkdir -p "$(dirname "$SOURCE_DIR")"
-        git clone https://github.com/RyanLiu112/compute-optimal-tts.git "$SOURCE_DIR"
-        git -C "$SOURCE_DIR" checkout --detach "$SOURCE_REVISION"
-    fi
-    [[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" == "$SOURCE_REVISION" ]] ||
-        die "$SOURCE_DIR is not at $SOURCE_REVISION; update it explicitly rather than overwriting it."
-}
-
-apply_compatibility_patch() {
-    git -C "$SOURCE_DIR" apply --check "$PATCH_FILE" 2>/dev/null && {
-        git -C "$SOURCE_DIR" apply "$PATCH_FILE"
-        return
-    }
-    git -C "$SOURCE_DIR" apply --reverse --check "$PATCH_FILE" 2>/dev/null ||
-        die "the TTS compatibility patch is neither cleanly applicable nor already applied."
-}
-
+# Step 1: verify the selected locked environment exists.
 [[ -f "$ENV_DIR/pyproject.toml" ]] || die "unknown TTS_TARGET '$TARGET'"
-ensure_source
-apply_compatibility_patch
 
-if [[ "$TARGET" == "rtx5090" ]]; then
-    [[ -x "$CUDA_HOME/bin/nvcc" ]] || die "run scripts/0_setup.sh to install the user-local CUDA Toolkit"
-    [[ -d "$VLLM_SOURCE_DIR/.git" ]] || die "run scripts/0_setup.sh to fetch the pinned vLLM source"
-    [[ "$(git -C "$VLLM_SOURCE_DIR" rev-parse HEAD)" == "$VLLM_REVISION" ]] ||
-        die "$VLLM_SOURCE_DIR is not at the pinned vLLM revision"
-    export CUDA_HOME
-    export CUDACXX="$CUDA_HOME/bin/nvcc"
-    export PATH="$CUDA_HOME/bin:$PATH"
-    export VLLM_TARGET_DEVICE=cuda
-    export TORCH_CUDA_ARCH_LIST=12.0
-    export CMAKE_CUDA_ARCHITECTURES=120
-    export MAX_JOBS="${VLLM_MAX_JOBS:-4}"
-    # vLLM treats any nonempty value, including "0", as precompiled mode.
-    unset VLLM_USE_PRECOMPILED
+# Step 2: fetch or verify the pinned Compute-Optimal-TTS source checkout.
+if [[ ! -d "$SOURCE_DIR/.git" ]]; then
+    mkdir -p "$(dirname "$SOURCE_DIR")"
+    git clone https://github.com/RyanLiu112/compute-optimal-tts.git "$SOURCE_DIR"
+    git -C "$SOURCE_DIR" checkout --detach "$SOURCE_REVISION"
+fi
+[[ "$(git -C "$SOURCE_DIR" rev-parse HEAD)" == "$SOURCE_REVISION" ]] ||
+    die "$SOURCE_DIR is not at $SOURCE_REVISION; update it explicitly rather than overwriting it."
+
+# Step 3: apply our compatibility patch once. If it is already applied, keep going.
+if git -C "$SOURCE_DIR" apply --check "$PATCH_FILE" 2>/dev/null; then
+    git -C "$SOURCE_DIR" apply "$PATCH_FILE"
+elif ! git -C "$SOURCE_DIR" apply --reverse --check "$PATCH_FILE" 2>/dev/null; then
+    die "the TTS compatibility patch is neither cleanly applicable nor already applied."
 fi
 
+# Step 4: RTX 5090 uses a prebuilt Blackwell vLLM wheel.
+if [[ "$TARGET" == "rtx5090" ]]; then
+    mkdir -p "$(dirname "$VLLM_WHEEL")"
+    if [[ ! -f "$VLLM_WHEEL" ]]; then
+        printf 'Downloading vLLM wheel:\n  %s\n  -> %s\n' "$VLLM_WHEEL_URL" "$VLLM_WHEEL"
+        if command -v curl >/dev/null; then
+            curl --fail --location --retry 3 --output "$VLLM_WHEEL" "$VLLM_WHEEL_URL"
+        elif command -v wget >/dev/null; then
+            wget --output-document="$VLLM_WHEEL" "$VLLM_WHEEL_URL"
+        else
+            die "curl or wget is required to download $VLLM_WHEEL_URL"
+        fi
+    fi
+    [[ "$(sha256sum "$VLLM_WHEEL" | awk '{print $1}')" == "$VLLM_WHEEL_SHA256" ]] ||
+        die "unexpected SHA256 for $VLLM_WHEEL"
+fi
+
+# Step 5: install the locked Python environment.
 mkdir -p "$HF_CACHE"
-if [[ "$TARGET" == "rtx5090" ]]; then
-    # The lockfile points to the pinned source tree.  Build it in the final UV
-    # environment, using the CUDA 12.8 toolkit installed by step 0.
-    uv sync --directory "$ENV_DIR" --frozen --no-build-isolation --python "$PYTHON_BIN"
-    vllm_fa2="$($ENV_DIR/.venv/bin/python -c 'import vllm.vllm_flash_attn._vllm_fa2_C as module; print(module.__file__)')"
-    "$CUDA_HOME/bin/cuobjdump" --list-elf "$vllm_fa2" | grep -q 'sm_120' ||
-        die "the vLLM FlashAttention extension does not contain sm_120"
-else
-    uv sync --directory "$ENV_DIR" --frozen --python "$PYTHON_BIN"
-fi
+uv sync --directory "$ENV_DIR" --frozen --python "$PYTHON_BIN"
 
-# hf-mirror.com is incompatible with huggingface_hub metadata redirects in this setup.
+# Step 6: download the exact model weights used by the requested paper-scale
+# configurations. Use hf-mirror by default, but allow overriding:
+#   HF_ENDPOINT=https://huggingface.co bash scripts/1_env_compute_optimal_tts.sh
 export HF_HOME="$HF_CACHE"
-export HF_ENDPOINT="https://huggingface.co"
+export HF_HUB_CACHE="$HF_CACHE"
+export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"
 export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost"
 
@@ -89,11 +76,12 @@ export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost"
 #   1.5B + 1.5B: Qwen2.5-Math-1.5B + Skywork-o1-PRM-1.5B
 #   1.5B + 7B:   Qwen2.5-Math-1.5B + Math-Shepherd-Mistral-7B-PRM
 #   7B + 1.5B:   Qwen2.5-Math-7B   + Skywork-o1-PRM-1.5B
-download_model "$QWEN_MATH_1_5B"
-download_model "$QWEN_MATH_7B"
-download_model "$SKYWORK_PRM_1_5B"
-download_model "$MATH_SHEPHERD_PRM_7B"
+"$HF_BIN" download "$QWEN_MATH_1_5B" --cache-dir "$HF_HOME"
+"$HF_BIN" download "$QWEN_MATH_7B" --cache-dir "$HF_HOME"
+"$HF_BIN" download "$SKYWORK_PRM_1_5B" --cache-dir "$HF_HOME"
+"$HF_BIN" download "$MATH_SHEPHERD_PRM_7B" --cache-dir "$HF_HOME"
 
+# Step 7: verify the bundled smoke-test dataset is present.
 # The AIME24, AMC23, and MATH-500 JSONL assets used by the upstream evaluator
 # are versioned with the pinned source tree; fail early if the smoke dataset is absent.
 readonly AIME24_DATASET="$SOURCE_DIR/src/envs/MATH/dataset/test_aime.jsonl"

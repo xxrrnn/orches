@@ -13,6 +13,16 @@ index b608657..ab499b9 100644
      else:
          ray.init()
 
+diff --git a/src/envs/MATH/latex2sympy/pyproject.toml b/src/envs/MATH/latex2sympy/pyproject.toml
+new file mode 100644
+index 0000000..f34c76a
+--- /dev/null
++++ b/src/envs/MATH/latex2sympy/pyproject.toml
+@@ -0,0 +1,3 @@
++[build-system]
++requires = ["setuptools", "wheel"]
++build-backend = "setuptools.build_meta"
+
 diff --git a/src/reason/llm_service/workers/reward_model_worker.py b/src/reason/llm_service/workers/reward_model_worker.py
 index f0e55b8..df09cb4 100644
 --- a/src/reason/llm_service/workers/reward_model_worker.py
@@ -104,6 +114,7 @@ index e773ab8..6cdaeda 100644
 
  import argparse
  import asyncio
++import os
 +import sys
  import json
  import time
@@ -143,3 +154,13 @@ index e773ab8..6cdaeda 100644
 
          if not no_register:
              self.init_heart_beat()
+
+@@ -267,6 +287,8 @@ if __name__ == "__main__":
+         args.max_model_len = args.max_model_length
+     if args.max_num_sequences > 0:
+         args.max_num_seqs = args.max_num_sequences
++    if os.environ.get("VLLM_ENFORCE_EAGER", "0") == "1":
++        args.enforce_eager = True
+ 
+     if 'ministral' in args.model_path.lower() or 'mistral' in args.model_path.lower():
+         args.tokenizer_mode = 'mistral'
