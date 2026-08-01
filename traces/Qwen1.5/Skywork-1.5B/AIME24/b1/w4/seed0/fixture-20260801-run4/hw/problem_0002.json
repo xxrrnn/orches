@@ -1,0 +1,832 @@
+{
+  "schema_version": "tts-trace-v1",
+  "run_id": "Qwen1.5/Skywork-1.5B/AIME24/b1/w4/seed0/fixture-20260801-run4",
+  "problem_id": "2",
+  "models": {
+    "policy": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+    "prm": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B"
+  },
+  "branches": [
+    {
+      "branch_id": "p2.g0.b0",
+      "parent_branch_id": "p2.root",
+      "created_by": "p-0",
+      "shared_prefix_tokens": 126,
+      "generated_tokens": 71,
+      "selected": true,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g0.b1",
+      "parent_branch_id": "p2.root",
+      "created_by": "p-0",
+      "shared_prefix_tokens": 126,
+      "generated_tokens": 43,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g0.b2",
+      "parent_branch_id": "p2.root",
+      "created_by": "p-0",
+      "shared_prefix_tokens": 126,
+      "generated_tokens": 76,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g0.b3",
+      "parent_branch_id": "p2.root",
+      "created_by": "p-0",
+      "shared_prefix_tokens": 126,
+      "generated_tokens": 45,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g1.b0",
+      "parent_branch_id": "p2.g0.b0",
+      "created_by": "p-1",
+      "shared_prefix_tokens": 197,
+      "generated_tokens": 49,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g1.b1",
+      "parent_branch_id": "p2.g0.b0",
+      "created_by": "p-1",
+      "shared_prefix_tokens": 197,
+      "generated_tokens": 84,
+      "selected": true,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g1.b2",
+      "parent_branch_id": "p2.g0.b0",
+      "created_by": "p-1",
+      "shared_prefix_tokens": 197,
+      "generated_tokens": 49,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g1.b3",
+      "parent_branch_id": "p2.g0.b0",
+      "created_by": "p-1",
+      "shared_prefix_tokens": 197,
+      "generated_tokens": 47,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g2.b0",
+      "parent_branch_id": "p2.g1.b1",
+      "created_by": "p-2",
+      "shared_prefix_tokens": 281,
+      "generated_tokens": 382,
+      "selected": true,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g2.b1",
+      "parent_branch_id": "p2.g1.b1",
+      "created_by": "p-2",
+      "shared_prefix_tokens": 281,
+      "generated_tokens": 382,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g2.b2",
+      "parent_branch_id": "p2.g1.b1",
+      "created_by": "p-2",
+      "shared_prefix_tokens": 281,
+      "generated_tokens": 386,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g2.b3",
+      "parent_branch_id": "p2.g1.b1",
+      "created_by": "p-2",
+      "shared_prefix_tokens": 281,
+      "generated_tokens": 652,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g3.b0",
+      "parent_branch_id": "p2.g2.b0",
+      "created_by": "p-3",
+      "shared_prefix_tokens": 663,
+      "generated_tokens": 59,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g3.b1",
+      "parent_branch_id": "p2.g2.b0",
+      "created_by": "p-3",
+      "shared_prefix_tokens": 663,
+      "generated_tokens": 77,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g3.b2",
+      "parent_branch_id": "p2.g2.b0",
+      "created_by": "p-3",
+      "shared_prefix_tokens": 663,
+      "generated_tokens": 65,
+      "selected": false,
+      "final_selected": false
+    },
+    {
+      "branch_id": "p2.g3.b3",
+      "parent_branch_id": "p2.g2.b0",
+      "created_by": "p-3",
+      "shared_prefix_tokens": 663,
+      "generated_tokens": 328,
+      "selected": true,
+      "final_selected": true
+    }
+  ],
+  "policy_generations": [
+    {
+      "generation_id": "p-0",
+      "parent_branch_id": "p2.root",
+      "service": "policy",
+      "model_id": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+      "prompt_tokens": 126,
+      "request_n": 4,
+      "candidate_branch_ids": [
+        "p2.g0.b0",
+        "p2.g0.b1",
+        "p2.g0.b2",
+        "p2.g0.b3"
+      ],
+      "completion_tokens": [
+        71,
+        43,
+        76,
+        45
+      ],
+      "prefill": {
+        "request_count": 1,
+        "prompt_tokens": [
+          126
+        ],
+        "spawned_sequences": 4,
+        "shared_prefix_tokens": 126
+      },
+      "decode_segments": [
+        {
+          "token_range": [
+            0,
+            43
+          ],
+          "branch_ids": [
+            "p2.g0.b1",
+            "p2.g0.b3",
+            "p2.g0.b0",
+            "p2.g0.b2"
+          ],
+          "batch_size": 4,
+          "sequence_length_start": [
+            126,
+            126,
+            126,
+            126
+          ],
+          "sequence_length_end": [
+            169,
+            169,
+            169,
+            169
+          ]
+        },
+        {
+          "token_range": [
+            43,
+            45
+          ],
+          "branch_ids": [
+            "p2.g0.b3",
+            "p2.g0.b0",
+            "p2.g0.b2"
+          ],
+          "batch_size": 3,
+          "sequence_length_start": [
+            169,
+            169,
+            169
+          ],
+          "sequence_length_end": [
+            171,
+            171,
+            171
+          ]
+        },
+        {
+          "token_range": [
+            45,
+            71
+          ],
+          "branch_ids": [
+            "p2.g0.b0",
+            "p2.g0.b2"
+          ],
+          "batch_size": 2,
+          "sequence_length_start": [
+            171,
+            171
+          ],
+          "sequence_length_end": [
+            197,
+            197
+          ]
+        },
+        {
+          "token_range": [
+            71,
+            76
+          ],
+          "branch_ids": [
+            "p2.g0.b2"
+          ],
+          "batch_size": 1,
+          "sequence_length_start": [
+            197
+          ],
+          "sequence_length_end": [
+            202
+          ]
+        }
+      ]
+    },
+    {
+      "generation_id": "p-1",
+      "parent_branch_id": "p2.g0.b0",
+      "service": "policy",
+      "model_id": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+      "prompt_tokens": 197,
+      "request_n": 4,
+      "candidate_branch_ids": [
+        "p2.g1.b0",
+        "p2.g1.b1",
+        "p2.g1.b2",
+        "p2.g1.b3"
+      ],
+      "completion_tokens": [
+        49,
+        84,
+        49,
+        47
+      ],
+      "prefill": {
+        "request_count": 1,
+        "prompt_tokens": [
+          197
+        ],
+        "spawned_sequences": 4,
+        "shared_prefix_tokens": 197
+      },
+      "decode_segments": [
+        {
+          "token_range": [
+            0,
+            47
+          ],
+          "branch_ids": [
+            "p2.g1.b3",
+            "p2.g1.b0",
+            "p2.g1.b2",
+            "p2.g1.b1"
+          ],
+          "batch_size": 4,
+          "sequence_length_start": [
+            197,
+            197,
+            197,
+            197
+          ],
+          "sequence_length_end": [
+            244,
+            244,
+            244,
+            244
+          ]
+        },
+        {
+          "token_range": [
+            47,
+            49
+          ],
+          "branch_ids": [
+            "p2.g1.b0",
+            "p2.g1.b2",
+            "p2.g1.b1"
+          ],
+          "batch_size": 3,
+          "sequence_length_start": [
+            244,
+            244,
+            244
+          ],
+          "sequence_length_end": [
+            246,
+            246,
+            246
+          ]
+        },
+        {
+          "token_range": [
+            49,
+            84
+          ],
+          "branch_ids": [
+            "p2.g1.b1"
+          ],
+          "batch_size": 1,
+          "sequence_length_start": [
+            246
+          ],
+          "sequence_length_end": [
+            281
+          ]
+        }
+      ]
+    },
+    {
+      "generation_id": "p-2",
+      "parent_branch_id": "p2.g1.b1",
+      "service": "policy",
+      "model_id": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+      "prompt_tokens": 281,
+      "request_n": 4,
+      "candidate_branch_ids": [
+        "p2.g2.b0",
+        "p2.g2.b1",
+        "p2.g2.b2",
+        "p2.g2.b3"
+      ],
+      "completion_tokens": [
+        382,
+        382,
+        386,
+        652
+      ],
+      "prefill": {
+        "request_count": 1,
+        "prompt_tokens": [
+          281
+        ],
+        "spawned_sequences": 4,
+        "shared_prefix_tokens": 281
+      },
+      "decode_segments": [
+        {
+          "token_range": [
+            0,
+            382
+          ],
+          "branch_ids": [
+            "p2.g2.b0",
+            "p2.g2.b1",
+            "p2.g2.b2",
+            "p2.g2.b3"
+          ],
+          "batch_size": 4,
+          "sequence_length_start": [
+            281,
+            281,
+            281,
+            281
+          ],
+          "sequence_length_end": [
+            663,
+            663,
+            663,
+            663
+          ]
+        },
+        {
+          "token_range": [
+            382,
+            386
+          ],
+          "branch_ids": [
+            "p2.g2.b2",
+            "p2.g2.b3"
+          ],
+          "batch_size": 2,
+          "sequence_length_start": [
+            663,
+            663
+          ],
+          "sequence_length_end": [
+            667,
+            667
+          ]
+        },
+        {
+          "token_range": [
+            386,
+            652
+          ],
+          "branch_ids": [
+            "p2.g2.b3"
+          ],
+          "batch_size": 1,
+          "sequence_length_start": [
+            667
+          ],
+          "sequence_length_end": [
+            933
+          ]
+        }
+      ]
+    },
+    {
+      "generation_id": "p-3",
+      "parent_branch_id": "p2.g2.b0",
+      "service": "policy",
+      "model_id": "Qwen/Qwen2.5-Math-1.5B-Instruct",
+      "prompt_tokens": 663,
+      "request_n": 4,
+      "candidate_branch_ids": [
+        "p2.g3.b0",
+        "p2.g3.b1",
+        "p2.g3.b2",
+        "p2.g3.b3"
+      ],
+      "completion_tokens": [
+        59,
+        77,
+        65,
+        328
+      ],
+      "prefill": {
+        "request_count": 1,
+        "prompt_tokens": [
+          663
+        ],
+        "spawned_sequences": 4,
+        "shared_prefix_tokens": 663
+      },
+      "decode_segments": [
+        {
+          "token_range": [
+            0,
+            59
+          ],
+          "branch_ids": [
+            "p2.g3.b0",
+            "p2.g3.b2",
+            "p2.g3.b1",
+            "p2.g3.b3"
+          ],
+          "batch_size": 4,
+          "sequence_length_start": [
+            663,
+            663,
+            663,
+            663
+          ],
+          "sequence_length_end": [
+            722,
+            722,
+            722,
+            722
+          ]
+        },
+        {
+          "token_range": [
+            59,
+            65
+          ],
+          "branch_ids": [
+            "p2.g3.b2",
+            "p2.g3.b1",
+            "p2.g3.b3"
+          ],
+          "batch_size": 3,
+          "sequence_length_start": [
+            722,
+            722,
+            722
+          ],
+          "sequence_length_end": [
+            728,
+            728,
+            728
+          ]
+        },
+        {
+          "token_range": [
+            65,
+            77
+          ],
+          "branch_ids": [
+            "p2.g3.b1",
+            "p2.g3.b3"
+          ],
+          "batch_size": 2,
+          "sequence_length_start": [
+            728,
+            728
+          ],
+          "sequence_length_end": [
+            740,
+            740
+          ]
+        },
+        {
+          "token_range": [
+            77,
+            328
+          ],
+          "branch_ids": [
+            "p2.g3.b3"
+          ],
+          "batch_size": 1,
+          "sequence_length_start": [
+            740
+          ],
+          "sequence_length_end": [
+            991
+          ]
+        }
+      ]
+    }
+  ],
+  "prm_forwards": [
+    {
+      "verification_id": "r-0",
+      "generation_id": "p-0",
+      "service": "prm",
+      "model_id": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+      "branch_ids": [
+        "p2.g0.b0",
+        "p2.g0.b1",
+        "p2.g0.b2",
+        "p2.g0.b3"
+      ],
+      "logical_batch_size": 4,
+      "valid_input_tokens": [
+        171,
+        143,
+        176,
+        145
+      ],
+      "execution_units": [
+        {
+          "tensor_shape": [
+            1,
+            171
+          ],
+          "valid_input_tokens": 171,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            143
+          ],
+          "valid_input_tokens": 143,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            176
+          ],
+          "valid_input_tokens": 176,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            145
+          ],
+          "valid_input_tokens": 145,
+          "execution_mode": "serial"
+        }
+      ],
+      "persistent_kv": false
+    },
+    {
+      "verification_id": "r-1",
+      "generation_id": "p-1",
+      "service": "prm",
+      "model_id": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+      "branch_ids": [
+        "p2.g1.b0",
+        "p2.g1.b1",
+        "p2.g1.b2",
+        "p2.g1.b3"
+      ],
+      "logical_batch_size": 4,
+      "valid_input_tokens": [
+        221,
+        256,
+        221,
+        219
+      ],
+      "execution_units": [
+        {
+          "tensor_shape": [
+            1,
+            221
+          ],
+          "valid_input_tokens": 221,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            256
+          ],
+          "valid_input_tokens": 256,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            221
+          ],
+          "valid_input_tokens": 221,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            219
+          ],
+          "valid_input_tokens": 219,
+          "execution_mode": "serial"
+        }
+      ],
+      "persistent_kv": false
+    },
+    {
+      "verification_id": "r-2",
+      "generation_id": "p-2",
+      "service": "prm",
+      "model_id": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+      "branch_ids": [
+        "p2.g2.b0",
+        "p2.g2.b1",
+        "p2.g2.b2",
+        "p2.g2.b3"
+      ],
+      "logical_batch_size": 4,
+      "valid_input_tokens": [
+        639,
+        638,
+        643,
+        908
+      ],
+      "execution_units": [
+        {
+          "tensor_shape": [
+            1,
+            639
+          ],
+          "valid_input_tokens": 639,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            638
+          ],
+          "valid_input_tokens": 638,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            643
+          ],
+          "valid_input_tokens": 643,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            908
+          ],
+          "valid_input_tokens": 908,
+          "execution_mode": "serial"
+        }
+      ],
+      "persistent_kv": false
+    },
+    {
+      "verification_id": "r-3",
+      "generation_id": "p-3",
+      "service": "prm",
+      "model_id": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+      "branch_ids": [
+        "p2.g3.b0",
+        "p2.g3.b1",
+        "p2.g3.b2",
+        "p2.g3.b3"
+      ],
+      "logical_batch_size": 4,
+      "valid_input_tokens": [
+        699,
+        717,
+        705,
+        973
+      ],
+      "execution_units": [
+        {
+          "tensor_shape": [
+            1,
+            699
+          ],
+          "valid_input_tokens": 699,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            717
+          ],
+          "valid_input_tokens": 717,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            705
+          ],
+          "valid_input_tokens": 705,
+          "execution_mode": "serial"
+        },
+        {
+          "tensor_shape": [
+            1,
+            973
+          ],
+          "valid_input_tokens": 973,
+          "execution_mode": "serial"
+        }
+      ],
+      "persistent_kv": false
+    }
+  ],
+  "selections": [
+    {
+      "selection_id": "s-0",
+      "parent_branch_id": "p2.root",
+      "kept_branch_ids": [
+        "p2.g0.b0"
+      ],
+      "pruned_branch_ids": [
+        "p2.g0.b1",
+        "p2.g0.b2",
+        "p2.g0.b3"
+      ]
+    },
+    {
+      "selection_id": "s-1",
+      "parent_branch_id": "p2.g0.b0",
+      "kept_branch_ids": [
+        "p2.g1.b1"
+      ],
+      "pruned_branch_ids": [
+        "p2.g1.b0",
+        "p2.g1.b2",
+        "p2.g1.b3"
+      ]
+    },
+    {
+      "selection_id": "s-2",
+      "parent_branch_id": "p2.g1.b1",
+      "kept_branch_ids": [
+        "p2.g2.b0"
+      ],
+      "pruned_branch_ids": [
+        "p2.g2.b1",
+        "p2.g2.b2",
+        "p2.g2.b3"
+      ]
+    },
+    {
+      "selection_id": "s-3",
+      "parent_branch_id": "p2.g2.b0",
+      "kept_branch_ids": [
+        "p2.g3.b3"
+      ],
+      "pruned_branch_ids": [
+        "p2.g3.b0",
+        "p2.g3.b1",
+        "p2.g3.b2"
+      ]
+    }
+  ]
+}

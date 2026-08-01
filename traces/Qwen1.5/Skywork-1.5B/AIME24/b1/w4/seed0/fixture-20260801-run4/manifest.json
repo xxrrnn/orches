@@ -1,0 +1,33 @@
+{
+  "schema_version": "tts-trace-v1",
+  "run_id": "Qwen1.5/Skywork-1.5B/AIME24/b1/w4/seed0/fixture-20260801-run4",
+  "task_name": "AIME24",
+  "seed": 0,
+  "policy_models": [
+    "Qwen/Qwen2.5-Math-1.5B-Instruct"
+  ],
+  "reward_model": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+  "model_snapshots": {
+    "policy": {
+      "Qwen/Qwen2.5-Math-1.5B-Instruct": "aafeb0fc6f22cbf0eaeed126eff8be45b0360a35"
+    },
+    "reward": "98d69606595eedbdbbbf0a7d28efdcd462ba6a67"
+  },
+  "runtime": {
+    "source_revision": null,
+    "patch_series": null,
+    "hf_hub_offline": "1"
+  },
+  "method": "beam_search",
+  "tree_max_width": 4,
+  "tree_max_depth": 4,
+  "num_sequence": 1,
+  "temperature": 0.7,
+  "top_p": 1,
+  "top_k": -1,
+  "max_new_tokens": 4096,
+  "trace_layout": {
+    "hardware": "hw/problem_<id>.json",
+    "software": "sw/problem_<id>.json"
+  }
+}

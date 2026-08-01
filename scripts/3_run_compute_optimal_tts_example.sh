@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run a small Compute-Optimal-TTS smoke test from the uv environment.
+# Run a reproducible Compute-Optimal-TTS smoke test from the uv environment.
 #
 # Common commands:
 #   bash scripts/3_run_compute_optimal_tts_example.sh start-cot
@@ -21,13 +21,13 @@ POLICY_PORT="${TTS_POLICY_PORT:-10082}"
 PRM_PORT="${TTS_PRM_PORT:-10081}"
 
 POLICY_GPU="${TTS_POLICY_GPU:-0}"
-PRM_GPU="${TTS_PRM_GPU:-1}"
+PRM_GPU="${TTS_PRM_GPU:-0}"
 
 POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-Math-1.5B-Instruct}"
 PRM_MODEL="${TTS_PRM_MODEL:-Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B}"
-MAX_MODEL_LENGTH="${TTS_MAX_MODEL_LENGTH:-4096}"
-MAX_NEW_TOKENS="${TTS_MAX_NEW_TOKENS:-1024}"
-POLICY_GPU_MEMORY_UTILIZATION="${TTS_POLICY_GPU_MEMORY_UTILIZATION:-0.88}"
+MAX_MODEL_LENGTH="${TTS_MAX_MODEL_LENGTH:-8192}"
+MAX_NEW_TOKENS="${TTS_MAX_NEW_TOKENS:-4096}"
+POLICY_GPU_MEMORY_UTILIZATION="${TTS_POLICY_GPU_MEMORY_UTILIZATION:-0.35}"
 TTS_TEMPERATURE="${TTS_TEMPERATURE:-0.7}"
 TTS_SEED="${TTS_SEED:-0}"
 TTS_STRICT_DETERMINISM="${TTS_STRICT_DETERMINISM:-1}"
@@ -36,11 +36,20 @@ TTS_PRM_MAX_CONCURRENCY="${TTS_PRM_MAX_CONCURRENCY:-1}"
 TTS_RUN_ID="${TTS_RUN_ID:-}"
 TTS_LOCAL="${TTS_LOCAL:-1}"
 TTS_TASK_NAME="${TTS_TASK_NAME:-AIME24}"
-TTS_BEAM_SIZE="${TTS_BEAM_SIZE:-2}"
+TTS_BEAM_SIZE="${TTS_BEAM_SIZE:-1}"
 TTS_TREE_MAX_WIDTH="${TTS_TREE_MAX_WIDTH:-4}"
 TTS_TREE_MAX_DEPTH="${TTS_TREE_MAX_DEPTH:-4}"
+TTS_QUESTION_MAX_NUM="${TTS_QUESTION_MAX_NUM:-3}"
+if [[ -n "${TTS_BATCH_SIZE:-}" ]]; then
+    TTS_BATCH_SIZE="$TTS_BATCH_SIZE"
+elif (( TTS_QUESTION_MAX_NUM > 0 )); then
+    TTS_BATCH_SIZE="$TTS_QUESTION_MAX_NUM"
+else
+    TTS_BATCH_SIZE=30
+fi
+TTS_MAX_TIME="${TTS_MAX_TIME:-0}"
 TTS_VERIFY_DETERMINISM="${TTS_VERIFY_DETERMINISM:-1}"
-TTS_DETERMINISM_FIXTURE="${TTS_DETERMINISM_FIXTURE:-$ROOT_DIR/traces/Qwen0.5/Skywork-1.5B/AIME24/b2/w4/sw/problem_0000.json}"
+TTS_DETERMINISM_FIXTURE="${TTS_DETERMINISM_FIXTURE:-$ROOT_DIR/traces/Qwen1.5/Skywork-1.5B/AIME24/b1/w4/seed0/fixture-20260801-run4/sw/problem_0000.json}"
 
 SAVE_BASE_DIR="${TTS_SAVE_BASE_DIR:-/tmp/orches-tts-runs}"
 TRACE_BASE_DIR="${TTS_TRACE_BASE_DIR:-$ROOT_DIR/traces}"
@@ -233,10 +242,10 @@ if [[ "$COMMAND" == "run-cot" || "$COMMAND" == "cot" ]]; then
         --controller_addr "http://$HOST_ADDR:$CONTROLLER_PORT" \
         --add_step_prompt \
         --question_parallel_num 1 \
-        --question_max_num "${TTS_QUESTION_MAX_NUM:-0}" \
+        --question_max_num "$TTS_QUESTION_MAX_NUM" \
         --double_line_break 1 \
-        --batch_size 1 \
-        --max_time 1 \
+        --batch_size "$TTS_BATCH_SIZE" \
+        --max_time "$TTS_MAX_TIME" \
         --local "$TTS_LOCAL"
 fi
 
@@ -261,10 +270,10 @@ if [[ "$COMMAND" == "run-beam" || "$COMMAND" == "beam" ]]; then
         --controller_addr "http://$HOST_ADDR:$CONTROLLER_PORT" \
         --add_step_prompt \
         --question_parallel_num 1 \
-        --question_max_num "${TTS_QUESTION_MAX_NUM:-0}" \
+        --question_max_num "$TTS_QUESTION_MAX_NUM" \
         --double_line_break 1 \
-        --batch_size 1 \
-        --max_time 1 \
+        --batch_size "$TTS_BATCH_SIZE" \
+        --max_time "$TTS_MAX_TIME" \
         --local "$TTS_LOCAL"
 fi
 

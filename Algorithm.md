@@ -36,6 +36,62 @@ trace；停止并重新 `start` 后再生成一份。比较时忽略 manifest �
 不同 GPU、CUDA、PyTorch、vLLM 或模型 revision 之间不应在未验证前假定 byte-for-byte
 一致；manifest 记录 source revision 与 patch series，方便识别这种环境差异。
 
+默认 TTS runner 使用已经在 RTX 5090 GPU 0 上验证过的复现配置：
+
+```text
+policy: Qwen/Qwen2.5-Math-1.5B-Instruct
+reward: Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B
+task: AIME24 first 3 examples
+beam: 1
+width: 4
+depth: 4
+max_new_tokens: 4096
+seed: 0
+policy GPU: 0
+PRM GPU: 0
+policy gpu_memory_utilization: 0.35
+policy max_model_length: 8192
+```
+
+该配置在同一台服务器、同一物理 GPU 0 上做过“模型离开显存后重载”的对比：先生成
+`fixture-20260801-run4`，停止 TTS/vLLM 并确认 GPU 0 显存释放到空闲，再用相同参数
+重新加载模型并生成 `fixture-20260801-run5`。两次运行的 output 目录完全一致；忽略
+`run_id` 后，software trace 和 hardware trace 的规范化 SHA256 也完全一致：
+
+```text
+trace aggregate:  2f2ff7a9f44abe955c64094deb401a89420c73abd775df4c138e07d78b579e10
+output aggregate: 2ad4dde8567118a8d470b651fe9432436ee9beb043c82430ce05760db10c3004
+```
+
+长时间间隔（例如一周后）重跑时，应把“同一物理 GPU”视为复现条件的一部分。模型
+离开显存不是问题，只要重启时保留同一软件栈、模型 snapshot、seed、解码参数、搜索
+参数和本地服务环境变量。换到另一张 GPU 即使型号相同，也必须先在那张 GPU 上重新跑
+两份 trace 并建立自己的 baseline；不要在未实测前假定不同 GPU 的 kernel 调度和数值
+路径能 byte-for-byte 一致。
+
+保持默认复现配置时，常规启动与运行命令为：
+
+```bash
+bash scripts/3_run_compute_optimal_tts_example.sh start-beam
+TTS_RUN_ID=Qwen1.5/Skywork-1.5B/AIME24/b1/w4/seed0/<new-run-id> \
+  bash scripts/3_run_compute_optimal_tts_example.sh run-beam
+```
+
+如果要跑完整 AIME24，把调度批大小一起改成 30，避免 evaluator 只分配部分题目：
+
+```bash
+TTS_RUN_ID=Qwen1.5/Skywork-1.5B/AIME24/b1/w4/seed0/full-aime24 \
+TTS_QUESTION_MAX_NUM=0 \
+TTS_BATCH_SIZE=30 \
+  bash scripts/3_run_compute_optimal_tts_example.sh run-beam
+```
+
+`max_new_tokens=4096` 需要 vLLM 以 `TTS_MAX_MODEL_LENGTH=8192` 启动，使 prompt 与
+生成上限能同时放入 KV cache。Qwen 1.5B 的模型配置声明原生
+`max_position_embeddings=4096`，因此这个设置是为了复现实验而显式放宽上下文；如果
+改回 `TTS_MAX_MODEL_LENGTH=4096`，4096-token 生成请求会因为 prompt 占用而不再是
+同一个配置。
+
 ### 目录与读取顺序
 
 每次运行创建一个全新的目录：
