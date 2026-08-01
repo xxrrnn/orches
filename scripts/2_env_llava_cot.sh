@@ -2,7 +2,7 @@
 # Bootstrap the reproducible LLaVA-CoT inference environment, model, and data.
 set -Eeuo pipefail
 
-readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+readonly ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly SOURCE_DIR="$ROOT_DIR/third_party/LLaVA-CoT"
 readonly ENV_NAME="${LLAVA_COT_ENV:-rtx5070ti}"
 readonly ENV_DIR="$ROOT_DIR/environments/llava-cot/$ENV_NAME"
