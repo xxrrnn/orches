@@ -6,6 +6,36 @@ Compute-Optimal-TTS 的 baseline beam search 已插入可复现 trace。它记�
 policy 生成、Skywork PRM reward、beam selection 与最终正确性；不包含 Duplex、
 AttAcc 或 ORCHES 的调度优化。这个 trace 可作为修改后的 Duplex/AttAcc 的输入。
 
+### Reproducibility
+
+trace run 默认启用严格确定性模式（`TTS_STRICT_DETERMINISM=1`）。必须固定
+`TTS_SEED`、模型 revision、prompt、解码参数和搜索参数；每个 run 必须使用新的
+`TTS_RUN_ID`。seed 会随 `LMCallingConfig` 进入 Ray actor，再从
+`seed + policy model + prompt` 派生为请求 seed；vLLM worker 同时以
+`ORCHES_TTS_SEED` 设置 engine seed，避免重启时使用随机的 engine 初始状态。
+
+为避免 GPU kernel 与并行随机数消费造成差异，严格模式关闭 TF32 和非确定性
+cuDNN 行为，policy 将 `n > 1` 候选按固定候选序号串行生成，PRM 使用 eager
+attention 且 policy/PRM concurrency 均为 1。每次 `run` 先重复调用固定 fixture
+验证 policy token 序列和 PRM reward；指纹不一致会失败，不会写入新的 trace。
+可单独执行：
+
+```bash
+TTS_SEED=0 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
+  bash scripts/4_generate_qwen05_skywork_trace.sh verify
+```
+
+这优先保证同一软件/驱动/GPU 配置下的可比较 trace，而非吞吐。串行多候选、单并发
+和 eager PRM 会明显降低速度；模型、prompt、temperature、top-p/top-k、token
+上限、beam 和 width 本身不变。由于并行 `n` 与串行 `n=1` 的随机数消费不同，严格
+模式的候选集合可能不同于旧的非严格 trace；比较实验必须全部使用同一严格模式。
+
+在新机器（例如 5090）上，先运行一次 `start`，以不同 `TTS_RUN_ID` 连续生成两份
+trace；停止并重新 `start` 后再生成一份。比较时忽略 manifest 的 `run_id`，并确认
+`manifest`、`hw/problem_0000.json`、`sw/problem_0000.json` 的规范化 JSON 一致。
+不同 GPU、CUDA、PyTorch、vLLM 或模型 revision 之间不应在未验证前假定 byte-for-byte
+一致；manifest 记录 source revision 与 patch series，方便识别这种环境差异。
+
 ### 目录与读取顺序
 
 每次运行创建一个全新的目录：
