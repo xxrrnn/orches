@@ -1,0 +1,766 @@
+diff --git a/src/envs/base_env.py b/src/envs/base_env.py
+index 620a52e55be9794f5cd052f4c820ddea4a452213..b10a7df042075340ab54b1669112ed7c85d8f0aa 100644
+--- a/src/envs/base_env.py
++++ b/src/envs/base_env.py
+@@ -266,6 +266,8 @@ class CoTEnv(BaseEnv):
+             texts = result.text  # [text1, text2]
+             logps_avg_by_len = result.logp_avg_by_len  # [-0.10557132510029904, -0.23053854329903292]
+             token_len = result.num_tokens  # [212, 192]
++            prompt_token_count = result.prompt_tokens[0] if isinstance(result.prompt_tokens, list) else result.prompt_tokens
++            output_token_ids = result.token_ids
+             temp_model_names = [self.llm_gen_fns[0].model_name] * len(texts)
+             temp_model_ids = [0] * len(texts)
+             finish_reason_list = []
+@@ -276,7 +278,7 @@ class CoTEnv(BaseEnv):
+         else:
+             raise NotImplementedError
+ 
+-        text_list, prob_list, num_token_list = [], [], []
++        text_list, prob_list, num_token_list, token_id_list = [], [], [], []
+         model_names, model_ids = [], []
+         next_state_terminated = {}
+         raw_text_list = []
+@@ -306,6 +308,7 @@ class CoTEnv(BaseEnv):
+                 raw_text_list.append(texts[i])
+                 prob_list.append(logps_avg_by_len[i])
+                 num_token_list.append(token_len[i])
++                token_id_list.append(output_token_ids[i])
+                 next_state_terminated[processed_act] = terminated
+                 model_names.append(temp_model_names[i])
+                 model_ids.append(temp_model_ids[i])
+@@ -314,6 +317,7 @@ class CoTEnv(BaseEnv):
+                 raw_text_list.append(texts[i])
+                 prob_list.append(logps_avg_by_len[i])
+                 num_token_list.append(token_len[i])
++                token_id_list.append(output_token_ids[i])
+                 next_state_terminated[processed_act] = terminated
+                 model_names.append(temp_model_names[i])
+                 model_ids.append(temp_model_ids[i])
+@@ -339,8 +343,11 @@ class CoTEnv(BaseEnv):
+             "messages": messages,
+             "stop_str": stop_str,
+             "raw_action": raw_action,
+-        } for action, prob, n_token, finish_reason, model_name, model_id, raw_action in zip(text_list, prob_list, num_token_list,
+-            finish_reason_list, model_names, model_ids, raw_text_list)]
++            "prompt_tokens": prompt_token_count,
++            "output_token_ids": token_ids,
++            "output_token_text": [self.llm_gen_fns[0].tokenizer.decode([token_id], skip_special_tokens=False) for token_id in token_ids],
++        } for action, prob, n_token, finish_reason, model_name, model_id, raw_action, token_ids in zip(text_list, prob_list, num_token_list,
++            finish_reason_list, model_names, model_ids, raw_text_list, token_id_list)]
+ 
+         if len(self.llm_gen_fns) == 1:
+             completion_tokens = result.completion_tokens
+diff --git a/src/reason/evaluation/evaluate.py b/src/reason/evaluation/evaluate.py
+index ab499b920f2ec183a5d3419a3b4e9beb1eae93a4..fbb906d2c922d2e5fb57e6b6c3e8e7741060d345 100644
+--- a/src/reason/evaluation/evaluate.py
++++ b/src/reason/evaluation/evaluate.py
+@@ -10,11 +10,13 @@ import time
+ from argparse import ArgumentParser
+ from datetime import datetime
+ from functools import partial
++from pathlib import Path
+ 
+ import jsonlines
+ import numpy as np
+ import tree
+ from transformers import AutoTokenizer
++from huggingface_hub import snapshot_download
+ import ray
+ from ray.util.actor_pool import ActorPool
+ 
+@@ -28,6 +30,7 @@ from reason.inference.rm_call import (
+     get_prm_special_tokens,
+ )
+ from utils import check_process_cnt, assign_tasks, get_model_name, setup_seed, check_lock_timeout
++from reason.tracing import trace_root_from_env
+ 
+ cot_prompt_dict = {
+     'llama_official': """Solve the following math problem efficiently and clearly:\n\n- For simple problems (2 steps or fewer):\nProvide a concise solution with minimal explanation.\n\n- For complex problems (3 steps or more):\nUse this step-by-step format:\n\n## Step 1: [Concise description]\n[Brief explanation and calculations]\n\n## Step 2: [Concise description]\n[Brief explanation and calculations]\n\n...\n\nRegardless of the approach, always conclude with:\n\nTherefore, the final answer is: $\\boxed{answer}$. I hope it is correct.\n\nWhere [answer] is just the final number or expression that solves the problem.""",
+@@ -98,6 +101,52 @@ if __name__ == "__main__":
+ 
+     args = parser.parse_args()
+ 
++    trace_root = trace_root_from_env()
++    if trace_root is not None:
++        policy_model_ids = args.LM.split(',')
++
++        def local_model_snapshot(model_id):
++            if model_id == "dummy":
++                return None
++            try:
++                return Path(snapshot_download(repo_id=model_id, local_files_only=True)).name
++            except Exception:
++                return None
++
++        trace_root.mkdir(parents=True, exist_ok=False)
++        trace_manifest = {
++            "schema_version": "tts-trace-v1",
++            "run_id": os.environ.get("ORCHES_TTS_RUN_ID", trace_root.name),
++            "task_name": args.task_name,
++            "seed": args.seed,
++            "policy_models": policy_model_ids,
++            "reward_model": args.RM,
++            "model_snapshots": {
++                "policy": {model_id: local_model_snapshot(model_id) for model_id in policy_model_ids},
++                "reward": local_model_snapshot(args.RM),
++            },
++            "runtime": {
++                "source_revision": os.environ.get("ORCHES_TTS_SOURCE_REVISION"),
++                "patch_series": os.environ.get("ORCHES_TTS_PATCH_SERIES"),
++                "hf_hub_offline": os.environ.get("HF_HUB_OFFLINE"),
++            },
++            "method": args.method,
++            "tree_max_width": args.tree_max_width,
++            "tree_max_depth": args.tree_max_depth,
++            "num_sequence": args.num_sequence,
++            "temperature": args.temperature,
++            "top_p": args.top_p,
++            "top_k": args.top_k,
++            "max_new_tokens": args.max_new_tokens,
++            "trace_layout": {
++                "hardware": "hw/problem_<id>.json",
++                "software": "sw/problem_<id>.json",
++            },
++        }
++        with open(trace_root / "manifest.json", "w", encoding="utf-8") as trace_file:
++            json.dump(trace_manifest, trace_file, ensure_ascii=False, indent=2)
++            trace_file.write("\n")
++
+     if 'llama-3' in args.LM.lower():
+         args.cot_prompt = cot_prompt_dict['llama_official']
+         args.llm_step_tag = llm_step_tag_dict['llama']
+@@ -348,6 +397,8 @@ if __name__ == "__main__":
+     )
+ 
+     test_ds = task.test_ds(args.task_name)
++    if args.question_max_num > 0:
++        test_ds = [test_ds[idx] for idx in range(min(len(test_ds), args.question_max_num))]
+ 
+     returned_temp = parallel_evaluate_test_dataset(
+         actor_pool, test_ds, args.method, solver_fn, save_dir, question_parallel_num=args.question_parallel_num,
+diff --git a/src/reason/evaluation/evaluator.py b/src/reason/evaluation/evaluator.py
+index 3ac38453559ff05d0e2bf0aa81c3d244dae81370..b8bc5f36e403d428ada92530f4db067d9e717254 100644
+--- a/src/reason/evaluation/evaluator.py
++++ b/src/reason/evaluation/evaluator.py
+@@ -107,6 +107,7 @@ class TreeSearchSolutionOutput(SolutionOutput):
+     token_history: List[int]
+     prob_history: List[float]
+     model_history: List[str]
++    trace_recorder: object = None
+ 
+ 
+ class MathEvaluator:
+@@ -133,6 +134,21 @@ class MathEvaluator:
+         else:
+             model_history = [[]] * len(solution.solutions)
+         result, output = self.analyze_output(problem_inst, solution.solutions, reward_history, token_history, prob_history, model_history)
++        if isinstance(solution, TreeSearchSolutionOutput) and solution.trace_recorder is not None:
++            final_paths = [
++                {
++                    "path_idx": item["path_idx"],
++                    "extracted_answer": item["extracted_answer"],
++                    "is_correct": bool(self._task.judge_correct(
++                        problem_inst["question"],
++                        problem_inst.get("extracted_groundtruth", problem_inst.get("answer")),
++                        item["extracted_answer"],
++                    )),
++                }
++                for item in output
++            ]
++            problem_is_correct = bool(result.get(MAJORITY_VOTE, False))
++            solution.trace_recorder.finalize(problem_is_correct=problem_is_correct, final_paths=final_paths)
+         total_completion_token = 0
+         for i, o in enumerate(output):
+             o["completion_tokens"] = solution.completion_tokens[i]
+diff --git a/src/reason/evaluation/methods.py b/src/reason/evaluation/methods.py
+index bc1cf9259207c8036d5e9fecdde0bd76dba388b4..ba2fda9f3293a1288f8784fc92082ac30d39bbe6 100644
+--- a/src/reason/evaluation/methods.py
++++ b/src/reason/evaluation/methods.py
+@@ -9,6 +9,7 @@ from reason.inference.lm_call import LMCallingConfig, LanguageModelCallingFuncti
+ from reason.inference.rm_call import RewardModelCallingFunction
+ from reason.evaluation.evaluator import SolutionOutput, Task, TreeSearchSolutionOutput
+ from reason.guided_search.tree import SearchTree
++from reason.tracing import TTSProblemTrace
+ 
+ 
+ @dataclass
+@@ -55,6 +56,11 @@ def beam_search(
+     lm_calls: List[LanguageModelCallingFunction],
+     rm_call: RewardModelCallingFunction,
+ ) -> SolutionOutput:
++    trace_recorder = TTSProblemTrace.from_environment(
++        problem_inst=problem_inst,
++        policy_model=config.model_names[0],
++        prm_model=getattr(getattr(rm_call, "func", rm_call), "model_name", "dummy"),
++    )
+     task = Task(task_name=config.task_name)
+     env = task.env_fn(
+         config={
+@@ -75,6 +81,7 @@ def beam_search(
+             "direct_io": config.direct_io,
+             "double_line_break": config.double_line_break,
+             "model_names": config.model_names,
++            "trace_recorder": trace_recorder,
+         },
+         math_problems=[{
+             "question": problem_inst["question"],
+@@ -85,7 +92,12 @@ def beam_search(
+         update_legal_action=False,
+     )
+ 
+-    search_tree = SearchTree(cfg={"model_names": config.model_names, "direct_io": config.direct_io, "max_actions": config.tree_max_width})
++    search_tree = SearchTree(cfg={
++        "model_names": config.model_names,
++        "direct_io": config.direct_io,
++        "max_actions": config.tree_max_width,
++        "trace_recorder": trace_recorder,
++    })
+     traj_list = search_tree.beam_search(env, config.beam_size, config.tree_max_depth, rm_call)
+ 
+     return TreeSearchSolutionOutput(
+@@ -96,4 +108,5 @@ def beam_search(
+         token_history=[t["token_history"] for t in traj_list],
+         prob_history=[t["prob_history"] for t in traj_list],
+         model_history=[t["model_history"] for t in traj_list],
++        trace_recorder=trace_recorder,
+     )
+diff --git a/src/reason/guided_search/tree.py b/src/reason/guided_search/tree.py
+index 247749b56e887a91565cc975b3fa2cae6e5dc6f1..bd99096c6bbb5571282cc6d8b06c50799adbc7e6 100644
+--- a/src/reason/guided_search/tree.py
++++ b/src/reason/guided_search/tree.py
+@@ -242,6 +242,7 @@ class SearchTree:
+         self.model_names = self._cfg.get("model_names", [])
+         self.direct_io = self._cfg.get("direct_io", 0)
+         self.max_actions = self._cfg.get("max_actions", 0)
++        self.trace_recorder = self._cfg.get("trace_recorder")
+ 
+     @property
+     def num_generated_token(self):
+@@ -309,6 +310,11 @@ class SearchTree:
+                         for c_idx, c_node, c_q_plus_a, c_value, c_parent_value in top_k_children:
+                             new_env = cur_env.copy()
+                             heapq.heappush(top_k_nodes, (-c_q_plus_a, -c_value, -c_parent_value, c_node, new_env))
++                        if self.trace_recorder is not None:
++                            self.trace_recorder.record_selection(
++                                getattr(cur_node, "trace_branch_id", self.trace_recorder.root_branch_id()),
++                                [getattr(child, "trace_branch_id", "") for _, child, *_ in top_k_children],
++                            )
+                     else:
+                         ps = {action: copy.deepcopy(child.prior_p) for action, child in cur_node.children.items()}
+                         num_tokens = {action: copy.deepcopy(child.num_generated_token) for action, child in cur_node.children.items()}
+@@ -325,6 +331,11 @@ class SearchTree:
+                         for c_act, c_node, c_q_plus_a, c_value, c_parent_value in top_k_children:
+                             new_env = cur_env.copy()
+                             heapq.heappush(top_k_nodes, (-c_q_plus_a, -c_value, -c_parent_value, c_node, new_env))
++                        if self.trace_recorder is not None:
++                            self.trace_recorder.record_selection(
++                                getattr(cur_node, "trace_branch_id", self.trace_recorder.root_branch_id()),
++                                [getattr(child, "trace_branch_id", "") for _, child, *_ in top_k_children],
++                            )
+             top_k_nodes = heapq.nsmallest(k, top_k_nodes)  # nsmallest since we negate the value
+ 
+             # expand selected nodes
+@@ -343,6 +354,8 @@ class SearchTree:
+                 break
+ 
+         traj_list = []
++        if self.trace_recorder is not None:
++            self.trace_recorder.mark_final([getattr(node, "trace_branch_id", "") for *_, node, _ in end_nodes])
+         for i, (neg_e_q_plus_a, neg_e_v, neg_e_parent_v, e_node, e_env) in enumerate(end_nodes):
+             traj_list.append({
+                 "path_idx": i,
+@@ -422,6 +435,12 @@ class SearchTree:
+         """
+ 
+         text_state = simulate_env.get_state(model_name='raw')
++        parent_branch_id = getattr(node, "trace_branch_id", None)
++        trace_branch_ids = None
++        generation_id = None
++        if self.trace_recorder is not None:
++            trace_branch_ids = self.trace_recorder.begin_generation(parent_branch_id, simulate_env.legal_actions)
++            generation_id = self.trace_recorder.policy_generations[-1]["generation_id"]
+         if not self._init_critic_value:
+             leaf_value = rm_call(text_state)
+         else:
+@@ -431,6 +450,7 @@ class SearchTree:
+                 prms = [[0.0] for _ in simulate_env.legal_actions]
+             else:
+                 prm_inputs = [(simulate_env.question, simulate_env.answer + x["action"]) for x in simulate_env.legal_actions]
++                prms = None
+                 for i in range(2):
+                     try:
+                         prms = rm_call(prm_inputs)
+@@ -438,7 +458,11 @@ class SearchTree:
+                     except Exception as e:
+                         import traceback
+                         traceback.print_exc()
+-                        # prms = [[0.0] for _ in simulate_env.legal_actions]
++                if prms is None:
++                    logger.warning("PRM failed twice; assigning zero reward to the affected branches")
++                    prms = [[0.0] for _ in simulate_env.legal_actions]
++                if self.trace_recorder is not None:
++                    self.trace_recorder.record_verification(generation_id, trace_branch_ids, prm_inputs, prms, rm_call)
+             child_values = []
+             for act, rs in zip(simulate_env.legal_actions, prms):
+                 if len(simulate_env.action_history) + 1 != len(rs):
+@@ -485,6 +509,8 @@ class SearchTree:
+                     num_generated_token=action_dict["num_token"],
+                     model_name=model_name,
+                 )
++                if trace_branch_ids is not None:
++                    node.children[i].trace_branch_id = trace_branch_ids[i]
+             else:
+                 node.children[action] = LanguageNode(
+                     parent=node,
+@@ -497,6 +523,8 @@ class SearchTree:
+                     num_generated_token=action_dict["num_token"],
+                     model_name=model_name,
+                 )
++                if trace_branch_ids is not None:
++                    node.children[action].trace_branch_id = trace_branch_ids[i]
+             # set terminal node here
+             if simulate_env._next_state_terminated[action]:
+                 if self.direct_io:
+diff --git a/src/reason/inference/lm_call.py b/src/reason/inference/lm_call.py
+index 23b5f1288771e4db6831916951e77b3c3af80d73..547624a7947e8324fc34e6674a908770afcdaee4 100644
+--- a/src/reason/inference/lm_call.py
++++ b/src/reason/inference/lm_call.py
+@@ -3,6 +3,8 @@ This file is largely borrowed from OpenR (https://github.com/openreasoner/openr)
+ """
+ 
+ from dataclasses import dataclass
++import hashlib
++import os
+ from typing import List, Optional, Union
+ 
+ from transformers import AutoTokenizer
+@@ -21,6 +23,7 @@ class LMCallingConfig:
+     stop_str: Optional[Union[str, List[str]]] = None
+     include_stop_str_in_output: bool = False
+     first_generation: bool = False
++    seed: Optional[int] = None
+ 
+ 
+ class LanguageModelCallingFunction:
+@@ -56,6 +59,10 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
+         super().__init__(llm_step_tag)
+ 
+     def __call__(self, messages: str, config: LMCallingConfig) -> ConcatedLMGenResult:
++        seed_base = os.environ.get("ORCHES_TTS_SEED")
++        if seed_base is not None:
++            digest = hashlib.sha256(f"{seed_base}|{self.model_name}|{messages}".encode("utf-8")).digest()
++            config = LMCallingConfig(**{**config.__dict__, "seed": int.from_bytes(digest[:8], "big") % (2**31)})
+         if self.serve_type == "fastchat":
+             return _generate_fastchat(
+                 messages=messages,
+@@ -74,6 +81,7 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
+                 multi_gpu=self.multi_gpu,
+                 double_line_break=self.double_line_break,
+                 first_generation=config.first_generation,
++                seed=config.seed,
+             )
+         elif self.serve_type == "sgl_api":
+             return _generate_sgl(
+@@ -93,4 +101,5 @@ class VLLMRemoteCaller(LanguageModelCallingFunction):
+                 multi_gpu=self.multi_gpu,
+                 double_line_break=self.double_line_break,
+                 first_generation=config.first_generation,
++                seed=config.seed,
+             )
+diff --git a/src/reason/inference/text_generation.py b/src/reason/inference/text_generation.py
+index 888a136881b835a0022596d2e619da6171366cda..bf18ddc53b5a57ceeb31c20a0d1d857ea787050b 100644
+--- a/src/reason/inference/text_generation.py
++++ b/src/reason/inference/text_generation.py
+@@ -15,6 +15,7 @@ class ConcatedLMGenResult:
+     text: List[str]
+     prompt_tokens: List[int]
+     num_tokens: List[int]
++    token_ids: List[List[int]]
+     cumulative_logprob: List[float]
+     logp_avg_by_len: List[float]
+     finish_reason: List[str]
+@@ -62,6 +63,7 @@ def _generate_fastchat(
+     multi_gpu=False,
+     double_line_break=0,
+     first_generation=False,
++    seed=None,
+ ) -> ConcatedLMGenResult:
+     if multi_gpu:
+         ret = requests.post(controller_addr + "/get_worker_address", json={"model": model_name})  # get worker address by model name
+@@ -90,6 +92,7 @@ def _generate_fastchat(
+         "stop": stop_str,
+         "echo": False,
+         "include_stop_str_in_output": include_stop_str_in_output,
++        "seed": seed,
+     }
+ 
+     try:
+@@ -106,6 +109,7 @@ def _generate_fastchat(
+         text=results["text"],
+         prompt_tokens=results["usage"]["prompt_tokens"],
+         num_tokens=results["output_token_len"],
++        token_ids=results.get("output_token_ids", [[] for _ in results["text"]]),
+         cumulative_logprob=cum_logps,
+         logp_avg_by_len=avg_len_logps,
+         finish_reason=results["finish_reason"],
+@@ -130,6 +134,7 @@ def _generate_sgl(
+     multi_gpu=False,
+     double_line_break=0,
+     first_generation=False,
++    seed=None,
+ ) -> ConcatedLMGenResult:
+ 
+     if multi_gpu:
+@@ -195,6 +200,7 @@ def _generate_sgl(
+         text=text_list,
+         prompt_tokens=prompt_tokens_list,
+         num_tokens=num_tokens_list,
++        token_ids=[[] for _ in text_list],
+         cumulative_logprob=cum_logps,
+         logp_avg_by_len=avg_len_logps,
+         finish_reason=finish_reason_list,
+diff --git a/src/reason/llm_service/workers/vllm_worker.py b/src/reason/llm_service/workers/vllm_worker.py
+index 6bf66c869d54d854bf60b05fb8fbce3bdeccb016..777e4d34cb4b8593b589a3a89e3ed067e0c616ce 100644
+--- a/src/reason/llm_service/workers/vllm_worker.py
++++ b/src/reason/llm_service/workers/vllm_worker.py
+@@ -99,6 +99,7 @@ class VLLMWorker(BaseModelWorker):
+         use_beam_search = params.get("use_beam_search", False)
+         best_of = params.get("best_of", None)
+         include_stop_str_in_output = params.get("include_stop_str_in_output", False)
++        sampling_seed = params.get("seed", None)
+ 
+         # Handle stop_str
+         stop = set()
+@@ -127,6 +128,7 @@ class VLLMWorker(BaseModelWorker):
+             presence_penalty=presence_penalty,
+             frequency_penalty=frequency_penalty,
+             best_of=best_of,
++            seed=sampling_seed,
+             logprobs=1,
+             include_stop_str_in_output=include_stop_str_in_output,
+         )
+@@ -152,6 +154,7 @@ class VLLMWorker(BaseModelWorker):
+                 },
+                 "cumulative_logprob": [output.cumulative_logprob for output in request_output.outputs],
+                 "output_token_len": [len(output.token_ids) for output in request_output.outputs],
++                "output_token_ids": [list(output.token_ids) for output in request_output.outputs],
+                 "finish_reason": [output.finish_reason for output in request_output.outputs],
+             }
+             yield (json.dumps(ret) + "\0").encode()
+diff --git a/src/reason/tracing/__init__.py b/src/reason/tracing/__init__.py
+new file mode 100644
+--- /dev/null
++++ b/src/reason/tracing/__init__.py
+@@ -0,0 +1,5 @@
++"""Trace support for reproducible Compute-Optimal-TTS baseline runs."""
++
++from .tts_trace import TTSProblemTrace, trace_root_from_env
++
++__all__ = ["TTSProblemTrace", "trace_root_from_env"]
+diff --git a/src/reason/tracing/tts_trace.py b/src/reason/tracing/tts_trace.py
+new file mode 100644
+--- /dev/null
++++ b/src/reason/tracing/tts_trace.py
+@@ -0,0 +1,302 @@
++"""Readable per-problem hardware and software traces for TTS baseline runs.
++
++The hardware trace contains execution demand only.  The software trace is a
++separate profile artifact containing prompt/candidate text and PRM scores.
++Both files use the same stable IDs but neither embeds the other.
++"""
++
++from __future__ import annotations
++
++import json
++import os
++import re
++from dataclasses import dataclass, field
++from pathlib import Path
++from typing import Any, Dict, List, Optional, Sequence
++
++
++TRACE_SCHEMA_VERSION = "tts-trace-v1"
++
++
++def trace_root_from_env() -> Optional[Path]:
++    value = os.environ.get("ORCHES_TTS_TRACE_DIR", "").strip()
++    return Path(value).expanduser().resolve() if value else None
++
++
++def _problem_id(problem_inst: Dict[str, Any]) -> str:
++    explicit = problem_inst.get("trace_problem_id")
++    if explicit is not None:
++        return str(explicit)
++    file_path = str(problem_inst.get("file_path", ""))
++    match = re.search(r"question_(\d+)", file_path)
++    return match.group(1) if match else "unknown"
++
++
++def _json_dump(path: Path, document: Dict[str, Any]) -> None:
++    path.parent.mkdir(parents=True, exist_ok=True)
++    temporary = path.with_suffix(path.suffix + ".tmp")
++    temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=False) + "\n", encoding="utf-8")
++    temporary.replace(path)
++
++
++def _message_text(messages: Sequence[Dict[str, Any]]) -> str:
++    return "\n".join(f"{message.get('role', 'unknown')}: {message.get('content', '')}" for message in messages)
++
++
++@dataclass
++class TTSProblemTrace:
++    root: Path
++    problem_inst: Dict[str, Any]
++    run_id: str
++    policy_model: str
++    prm_model: str
++    problem_id: str = field(init=False)
++    branches: Dict[str, Dict[str, Any]] = field(default_factory=dict)
++    policy_generations: List[Dict[str, Any]] = field(default_factory=list)
++    prm_forwards: List[Dict[str, Any]] = field(default_factory=list)
++    selections: List[Dict[str, Any]] = field(default_factory=list)
++    software_generations: List[Dict[str, Any]] = field(default_factory=list)
++    software_rewards: List[Dict[str, Any]] = field(default_factory=list)
++    _generation_counter: int = 0
++    _verification_counter: int = 0
++    _selection_counter: int = 0
++
++    def __post_init__(self) -> None:
++        self.problem_id = _problem_id(self.problem_inst)
++
++    @classmethod
++    def from_environment(
++        cls,
++        problem_inst: Dict[str, Any],
++        policy_model: str,
++        prm_model: str,
++    ) -> Optional["TTSProblemTrace"]:
++        root = trace_root_from_env()
++        if root is None:
++            return None
++        return cls(
++            root=root,
++            problem_inst=problem_inst,
++            run_id=os.environ.get("ORCHES_TTS_RUN_ID", root.name),
++            policy_model=policy_model,
++            prm_model=prm_model,
++        )
++
++    def root_branch_id(self) -> str:
++        return f"p{self.problem_id}.root"
++
++    def begin_generation(self, parent_branch_id: Optional[str], legal_actions: Sequence[Dict[str, Any]]) -> List[str]:
++        generation_id = f"p-{self._generation_counter}"
++        self._generation_counter += 1
++        parent_branch_id = parent_branch_id or self.root_branch_id()
++        prompt_tokens = int(legal_actions[0].get("prompt_tokens", 0)) if legal_actions else 0
++        children = []
++        branch_ids = []
++        for index, action in enumerate(legal_actions):
++            branch_id = f"p{self.problem_id}.g{self._generation_counter - 1}.b{index}"
++            branch_ids.append(branch_id)
++            completion_tokens = int(action.get("num_token", 0))
++            children.append({
++                "branch_id": branch_id,
++                "completion_tokens": completion_tokens,
++                "finish_reason": action.get("finish_reason"),
++            })
++            self.branches[branch_id] = {
++                "branch_id": branch_id,
++                "parent_branch_id": parent_branch_id,
++                "created_by": generation_id,
++                "shared_prefix_tokens": prompt_tokens,
++                "generated_tokens": completion_tokens,
++                "selected": None,
++                "final_selected": False,
++            }
++
++        ordered_lengths = sorted((child["completion_tokens"], child["branch_id"]) for child in children)
++        decode_segments = []
++        previous = 0
++        active = [branch_id for _, branch_id in ordered_lengths]
++        for length, branch_id in ordered_lengths:
++            if length > previous:
++                active_ids = [candidate for candidate in active]
++                decode_segments.append({
++                    "token_range": [previous, length],
++                    "branch_ids": active_ids,
++                    "batch_size": len(active_ids),
++                    "sequence_length_start": [prompt_tokens + previous] * len(active_ids),
++                    "sequence_length_end": [prompt_tokens + length] * len(active_ids),
++                })
++                previous = length
++            active.remove(branch_id)
++
++        self.policy_generations.append({
++            "generation_id": generation_id,
++            "parent_branch_id": parent_branch_id,
++            "service": "policy",
++            "model_id": self.policy_model,
++            "prompt_tokens": prompt_tokens,
++            "request_n": len(children),
++            "candidate_branch_ids": branch_ids,
++            "completion_tokens": [child["completion_tokens"] for child in children],
++            "prefill": {
++                "request_count": 1,
++                "prompt_tokens": [prompt_tokens],
++                "spawned_sequences": len(children),
++                "shared_prefix_tokens": prompt_tokens,
++            },
++            "decode_segments": decode_segments,
++        })
++
++        prompt_text = _message_text(legal_actions[0].get("messages", [])) if legal_actions else ""
++        self.software_generations.append({
++            "generation_id": generation_id,
++            "parent_branch_id": parent_branch_id,
++            "policy_model": self.policy_model,
++            "prompt_text": prompt_text,
++            "candidates": [
++                {
++                    "branch_id": branch_id,
++                    "output_text": action.get("raw_action", action.get("action", "")),
++                    "output_token_text": action.get("output_token_text", []),
++                    "finish_reason": action.get("finish_reason"),
++                }
++                for branch_id, action in zip(branch_ids, legal_actions)
++            ],
++        })
++        return branch_ids
++
++    def record_verification(
++        self,
++        generation_id: str,
++        branch_ids: Sequence[str],
++        qa_pairs: Sequence[Sequence[str]],
++        rewards: Sequence[Sequence[float]],
++        rm_callable: Any,
++    ) -> str:
++        verification_id = f"r-{self._verification_counter}"
++        self._verification_counter += 1
++        worker_inputs, token_lengths, execution_units = self._prm_execution_shape(qa_pairs, rm_callable)
++        self.prm_forwards.append({
++            "verification_id": verification_id,
++            "generation_id": generation_id,
++            "service": "prm",
++            "model_id": self.prm_model,
++            "branch_ids": list(branch_ids),
++            "logical_batch_size": len(branch_ids),
++            "valid_input_tokens": token_lengths,
++            "execution_units": execution_units,
++            "persistent_kv": False,
++        })
++        self.software_rewards.append({
++            "verification_id": verification_id,
++            "generation_id": generation_id,
++            "prm_model": self.prm_model,
++            "candidates": [
++                {
++                    "branch_id": branch_id,
++                    "prm_input_text": self._worker_input_text(worker_input, question, answer),
++                    "prm_score": float(score[-1]) if score else None,
++                    "step_rewards": [float(value) for value in score],
++                }
++                for branch_id, (question, answer), worker_input, score in zip(branch_ids, qa_pairs, worker_inputs, rewards)
++            ],
++        })
++        return verification_id
++
++    @staticmethod
++    def _worker_input_text(worker_input: Any, question: str, answer: str) -> str:
++        """Render the exact PRM worker payload only in the software trace."""
++        if isinstance(worker_input, str):
++            return worker_input
++        if isinstance(worker_input, (list, tuple)) and len(worker_input) == 2:
++            return f"{worker_input[0]}\n{worker_input[1]}"
++        return f"{question}\n{answer}"
++
++    def _prm_execution_shape(self, qa_pairs: Sequence[Sequence[str]], rm_callable: Any):
++        rm = getattr(rm_callable, "func", rm_callable)
++        model_name = getattr(rm, "model_name", self.prm_model)
++        tokenizer = getattr(rm, "tokenizer", None)
++        model_names = getattr(rm_callable, "keywords", {}).get("model_names", [self.policy_model])
++        try:
++            worker_inputs = rm.process_input(list(qa_pairs), model_names, verbose=False)
++        except Exception:
++            worker_inputs = [list(pair) for pair in qa_pairs]
++
++        token_lengths: List[int] = []
++        if tokenizer is not None and "skywork" in str(model_name).lower():
++            for question, answer in worker_inputs:
++                normalized = answer.replace("\n", "<|vision_start|>") + "<|vision_start|>"
++                prompt = tokenizer.bos_token + question + "\n"
++                token_lengths.append(len(tokenizer.encode(prompt)) + len(tokenizer.encode(normalized)))
++            execution_units = [
++                {"tensor_shape": [1, length], "valid_input_tokens": length, "execution_mode": "serial"}
++                for length in token_lengths
++            ]
++        elif tokenizer is not None and all(isinstance(item, str) for item in worker_inputs):
++            token_lengths = [len(tokenizer.encode(item)) for item in worker_inputs]
++            padded_length = max(token_lengths, default=0)
++            execution_units = [{
++                "tensor_shape": [len(token_lengths), padded_length],
++                "valid_input_tokens": token_lengths,
++                "execution_mode": "padded_batch",
++            }]
++        else:
++            token_lengths = [0] * len(qa_pairs)
++            execution_units = [{"tensor_shape": None, "valid_input_tokens": token_lengths, "execution_mode": "unknown"}]
++        return worker_inputs, token_lengths, execution_units
++
++    def record_selection(self, parent_branch_id: str, kept_branch_ids: Sequence[str]) -> None:
++        child_ids = [branch_id for branch_id, branch in self.branches.items() if branch["parent_branch_id"] == parent_branch_id]
++        if not child_ids:
++            return
++        selection_id = f"s-{self._selection_counter}"
++        self._selection_counter += 1
++        kept = list(kept_branch_ids)
++        pruned = [branch_id for branch_id in child_ids if branch_id not in kept]
++        for branch_id in child_ids:
++            self.branches[branch_id]["selected"] = branch_id in kept
++        self.selections.append({
++            "selection_id": selection_id,
++            "parent_branch_id": parent_branch_id,
++            "kept_branch_ids": kept,
++            "pruned_branch_ids": pruned,
++        })
++
++    def mark_final(self, branch_ids: Sequence[str]) -> None:
++        for branch_id in branch_ids:
++            if branch_id in self.branches:
++                self.branches[branch_id]["selected"] = True
++                self.branches[branch_id]["final_selected"] = True
++
++    def finalize(self, problem_is_correct: bool, final_paths: Sequence[Dict[str, Any]]) -> None:
++        key = f"problem_{int(self.problem_id):04d}" if self.problem_id.isdigit() else f"problem_{self.problem_id}"
++        for branch in self.branches.values():
++            if branch["selected"] is None:
++                branch["selected"] = False
++        software_generations = json.loads(json.dumps(self.software_generations))
++        for generation in software_generations:
++            for candidate in generation["candidates"]:
++                branch = self.branches[candidate["branch_id"]]
++                candidate["selected"] = branch["selected"]
++                candidate["final_selected"] = branch["final_selected"]
++        hw_document = {
++            "schema_version": TRACE_SCHEMA_VERSION,
++            "run_id": self.run_id,
++            "problem_id": self.problem_id,
++            "models": {"policy": self.policy_model, "prm": self.prm_model},
++            "branches": list(self.branches.values()),
++            "policy_generations": self.policy_generations,
++            "prm_forwards": self.prm_forwards,
++            "selections": self.selections,
++        }
++        sw_document = {
++            "schema_version": TRACE_SCHEMA_VERSION,
++            "run_id": self.run_id,
++            "problem_id": self.problem_id,
++            "question": {"text": self.problem_inst.get("question", ""), "answer": self.problem_inst.get("answer", "")},
++            "result": {"is_correct": bool(problem_is_correct), "final_paths": list(final_paths)},
++            "generation_events": software_generations,
++            "reward_events": self.software_rewards,
++            "search_events": self.selections,
++        }
++        _json_dump(self.root / "hw" / f"{key}.json", hw_document)
++        _json_dump(self.root / "sw" / f"{key}.json", sw_document)

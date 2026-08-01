@@ -1,0 +1,37 @@
+diff --git a/src/reason/tracing/tts_trace.py b/src/reason/tracing/tts_trace.py
+--- a/src/reason/tracing/tts_trace.py
++++ b/src/reason/tracing/tts_trace.py
+@@ -35,6 +35,30 @@ def _problem_id(problem_inst: Dict[str, Any]) -> str:
+ 
+-def _json_dump(path: Path, document: Dict[str, Any]) -> None:
++def _json_pretty(value: Any, level: int = 0, compact: bool = False) -> str:
++    """Pretty-print JSON while keeping decoded token text on one line."""
++    if compact:
++        return json.dumps(value, ensure_ascii=False, separators=(", ", ": "))
++    if isinstance(value, dict):
++        if not value:
++            return "{}"
++        child_indent = "  " * (level + 1)
++        entries = [
++            f"{child_indent}{json.dumps(key, ensure_ascii=False)}: "
++            f"{_json_pretty(item, level + 1, compact=(key == 'output_token_text'))}"
++            for key, item in value.items()
++        ]
++        return "{\n" + ",\n".join(entries) + "\n" + "  " * level + "}"
++    if isinstance(value, list):
++        if not value:
++            return "[]"
++        child_indent = "  " * (level + 1)
++        return "[\n" + ",\n".join(
++            f"{child_indent}{_json_pretty(item, level + 1)}" for item in value
++        ) + "\n" + "  " * level + "]"
++    return json.dumps(value, ensure_ascii=False)
++
++
++def _json_dump(path: Path, document: Dict[str, Any]) -> None:
+     path.parent.mkdir(parents=True, exist_ok=True)
+     temporary = path.with_suffix(path.suffix + ".tmp")
+-    temporary.write_text(json.dumps(document, ensure_ascii=False, indent=2, sort_keys=False) + "\n", encoding="utf-8")
++    temporary.write_text(_json_pretty(document) + "\n", encoding="utf-8")
+     temporary.replace(path)
+ 

@@ -1,0 +1,26 @@
+diff --git a/src/reason/tracing/tts_trace.py b/src/reason/tracing/tts_trace.py
+--- a/src/reason/tracing/tts_trace.py
++++ b/src/reason/tracing/tts_trace.py
+@@ -179,6 +179,7 @@ class TTSProblemTrace:
+             "candidates": [
+                 {
+                     "branch_id": branch_id,
++                    "token_length": int(action.get("num_token", 0)),
+                     "output_text": action.get("raw_action", action.get("action", "")),
+                     "output_token_text": action.get("output_token_text", []),
+                     "finish_reason": action.get("finish_reason"),
+@@ -217,10 +218,13 @@ class TTSProblemTrace:
+             "candidates": [
+                 {
+                     "branch_id": branch_id,
++                    "token_length": token_length,
+                     "prm_input_text": self._worker_input_text(worker_input, question, answer),
+                     "prm_score": float(score[-1]) if score else None,
+                     "reward_score": float(score[-1]) if score else None,
+                     "step_rewards": [float(value) for value in score],
+                 }
+-                for branch_id, (question, answer), worker_input, score in zip(branch_ids, qa_pairs, worker_inputs, rewards)
++                for branch_id, (question, answer), worker_input, token_length, score in zip(
++                    branch_ids, qa_pairs, worker_inputs, token_lengths, rewards
++                )
+             ],

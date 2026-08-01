@@ -1,0 +1,42 @@
+diff --git a/src/reason/llm_service/workers/vllm_worker.py b/src/reason/llm_service/workers/vllm_worker.py
+--- a/src/reason/llm_service/workers/vllm_worker.py
++++ b/src/reason/llm_service/workers/vllm_worker.py
+@@ -135,27 +135,31 @@ class VLLMWorker(BaseModelWorker):
+         )
+         results_generator = engine.generate(context, sampling_params, request_id)
++        collected_outputs = {}
+ 
+         async for request_output in results_generator:
++            for output in request_output.outputs:
++                collected_outputs[output.index] = output
++            outputs = [collected_outputs[index] for index in sorted(collected_outputs)]
+             prompt = request_output.prompt
+             if echo:
+-                text_outputs = [prompt + output.text for output in request_output.outputs]
++                text_outputs = [prompt + output.text for output in outputs]
+             else:
+-                text_outputs = [output.text for output in request_output.outputs]
++                text_outputs = [output.text for output in outputs]
+             # text_outputs = " ".join(text_outputs)
+             # Note: usage is not supported yet
+             prompt_tokens = len(request_output.prompt_token_ids)
+-            completion_tokens = sum(len(output.token_ids) for output in request_output.outputs)
++            completion_tokens = sum(len(output.token_ids) for output in outputs)
+             ret = {
+                 "text": text_outputs,
+                 "error_code": 0,
+                 "usage": {
+                     "prompt_tokens": prompt_tokens,
+                     "completion_tokens": completion_tokens,
+                     "total_tokens": prompt_tokens + completion_tokens,
+                 },
+-                "cumulative_logprob": [output.cumulative_logprob for output in request_output.outputs],
+-                "output_token_len": [len(output.token_ids) for output in request_output.outputs],
+-                "output_token_ids": [list(output.token_ids) for output in request_output.outputs],
+-                "finish_reason": [output.finish_reason for output in request_output.outputs],
++                "cumulative_logprob": [output.cumulative_logprob for output in outputs],
++                "output_token_len": [len(output.token_ids) for output in outputs],
++                "output_token_ids": [list(output.token_ids) for output in outputs],
++                "finish_reason": [output.finish_reason for output in outputs],
+             }
+             yield (json.dumps(ret) + "\0").encode()

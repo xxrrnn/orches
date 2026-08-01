@@ -1,0 +1,33 @@
+{
+  "schema_version": "tts-trace-v1",
+  "run_id": "Qwen0.5/Skywork-1.5B/AIME24/b2/w4",
+  "task_name": "AIME24",
+  "seed": 0,
+  "policy_models": [
+    "Qwen/Qwen2.5-0.5B-Instruct"
+  ],
+  "reward_model": "Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B",
+  "model_snapshots": {
+    "policy": {
+      "Qwen/Qwen2.5-0.5B-Instruct": "7ae557604adf67be50417f59c2c2f167def9a775"
+    },
+    "reward": "98d69606595eedbdbbbf0a7d28efdcd462ba6a67"
+  },
+  "runtime": {
+    "source_revision": "0ee2578af1f8d6cac445c9c4c72780528bb94556",
+    "patch_series": "001-tts-rtx50-compatibility,002-tts-baseline-tracing,003-vllm-multisample-aggregation,004-compact-output-token-text,005-reward-score-alias,006-software-candidate-token-lengths",
+    "hf_hub_offline": "1"
+  },
+  "method": "beam_search",
+  "tree_max_width": 4,
+  "tree_max_depth": 4,
+  "num_sequence": 2,
+  "temperature": 0.7,
+  "top_p": 1,
+  "top_k": -1,
+  "max_new_tokens": 64,
+  "trace_layout": {
+    "hardware": "hw/problem_<id>.json",
+    "software": "sw/problem_<id>.json"
+  }
+}

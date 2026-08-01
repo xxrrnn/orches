@@ -1,0 +1,12 @@
+diff --git a/src/reason/tracing/tts_trace.py b/src/reason/tracing/tts_trace.py
+--- a/src/reason/tracing/tts_trace.py
++++ b/src/reason/tracing/tts_trace.py
+@@ -217,6 +217,7 @@ class TTSProblemTrace:
+             "candidates": [
+                 {
+                     "branch_id": branch_id,
+                     "prm_input_text": self._worker_input_text(worker_input, question, answer),
+                     "prm_score": float(score[-1]) if score else None,
++                    "reward_score": float(score[-1]) if score else None,
+                     "step_rewards": [float(value) for value in score],
+                 }
