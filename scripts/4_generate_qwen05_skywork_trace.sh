@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Generate a small, reproducible Qwen-0.5B + Skywork-1.5B beam-search trace.
+# Generate a small, reproducible Qwen-1.5B + Skywork-1.5B beam-search trace.
 #
 # Usage:
 #   bash scripts/4_generate_qwen05_skywork_trace.sh start
@@ -15,7 +15,7 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RUNNER="$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh"
 
-POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-0.5B-Instruct}"
+POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}"
 PRM_MODEL="${TTS_PRM_MODEL:-Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B}"
 TASK_NAME="${TTS_TASK_NAME:-AIME24}"
 BEAM_SIZE="${TTS_BEAM_SIZE:-2}"
@@ -23,7 +23,7 @@ TREE_MAX_WIDTH="${TTS_TREE_MAX_WIDTH:-4}"
 TREE_MAX_DEPTH="${TTS_TREE_MAX_DEPTH:-4}"
 QUESTION_MAX_NUM="${TTS_QUESTION_MAX_NUM:-1}"
 MAX_NEW_TOKENS="${TTS_MAX_NEW_TOKENS:-64}"
-POLICY_LABEL="${TTS_POLICY_LABEL:-Qwen0.5}"
+POLICY_LABEL="${TTS_POLICY_LABEL:-Qwen1.5}"
 PRM_LABEL="${TTS_PRM_LABEL:-Skywork-1.5B}"
 COMMAND="${1:-run}"
 
@@ -41,8 +41,6 @@ COMMAND="${1:-run}"
     exit 1
 }
 
-export HF_HOME="${HF_HOME:-$ROOT_DIR/models}"
-export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
 export TTS_POLICY_MODEL="$POLICY_MODEL"
 export TTS_PRM_MODEL="$PRM_MODEL"
 export TTS_TASK_NAME="$TASK_NAME"

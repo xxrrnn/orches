@@ -14,6 +14,29 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_DIR="$ROOT_DIR/environments/tts"
 SOURCE_DIR="$ROOT_DIR/third_party/compute-optimal-tts/src"
 PYTHON="$ENV_DIR/.venv/bin/python"
+MODELS_ROOT="${ORCHES_MODELS_ROOT:-$ROOT_DIR/models}"
+
+resolve_model_path() {
+    local input="$1"
+    if [[ -d "$input" && -f "$input/config.json" ]]; then
+        printf '%s\n' "$(cd "$input" && pwd)"
+    elif [[ "$input" == */* ]]; then
+        printf '%s/%s\n' "$MODELS_ROOT" "${input##*/}"
+    else
+        printf '%s/%s\n' "$MODELS_ROOT" "$input"
+    fi
+}
+
+require_model() {
+    local path
+    path="$(resolve_model_path "$1")"
+    [[ -f "$path/config.json" ]] || {
+        printf 'error: missing model weights: %s\n' "$path" >&2
+        printf 'run: bash scripts/download_models.sh\n' >&2
+        exit 1
+    }
+    printf '%s\n' "$path"
+}
 
 HOST_ADDR="${TTS_HOST_ADDR:-127.0.0.1}"
 CONTROLLER_PORT="${TTS_CONTROLLER_PORT:-10014}"
@@ -23,8 +46,10 @@ PRM_PORT="${TTS_PRM_PORT:-10081}"
 POLICY_GPU="${TTS_POLICY_GPU:-0}"
 PRM_GPU="${TTS_PRM_GPU:-0}"
 
-POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-Math-1.5B-Instruct}"
+POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}"
 PRM_MODEL="${TTS_PRM_MODEL:-Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B}"
+POLICY_MODEL="$(require_model "$POLICY_MODEL")"
+PRM_MODEL="$(require_model "$PRM_MODEL")"
 MAX_MODEL_LENGTH="${TTS_MAX_MODEL_LENGTH:-8192}"
 MAX_NEW_TOKENS="${TTS_MAX_NEW_TOKENS:-4096}"
 POLICY_GPU_MEMORY_UTILIZATION="${TTS_POLICY_GPU_MEMORY_UTILIZATION:-0.35}"
@@ -54,9 +79,6 @@ TTS_DETERMINISM_FIXTURE="${TTS_DETERMINISM_FIXTURE:-$ROOT_DIR/traces/Qwen1.5/Sky
 SAVE_BASE_DIR="${TTS_SAVE_BASE_DIR:-/tmp/orches-tts-runs}"
 TRACE_BASE_DIR="${TTS_TRACE_BASE_DIR:-$ROOT_DIR/traces}"
 SAVE_DIR="${TTS_SAVE_DIR:-}"
-HF_HOME="${HF_HOME:-$ROOT_DIR/models}"
-HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
-HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
 
 COMMAND="${1:-cot}"
 
@@ -74,10 +96,9 @@ fi
 
 export PYTHONPATH="$SOURCE_DIR"
 export LOGDIR="$SOURCE_DIR/logs_fastchat"
-export HF_HOME
-export HF_HUB_CACHE
-export HF_ENDPOINT
 export HF_HUB_OFFLINE="${HF_HUB_OFFLINE:-1}"
+export TRANSFORMERS_OFFLINE="${TRANSFORMERS_OFFLINE:-1}"
+export ORCHES_MODELS_ROOT="$MODELS_ROOT"
 export PYTHONHASHSEED="${PYTHONHASHSEED:-$TTS_SEED}"
 export CUBLAS_WORKSPACE_CONFIG="${CUBLAS_WORKSPACE_CONFIG:-:4096:8}"
 export CUDA_DEVICE_MAX_CONNECTIONS="${CUDA_DEVICE_MAX_CONNECTIONS:-1}"
@@ -196,8 +217,8 @@ if [[ "$COMMAND" == "start-cot" || "$COMMAND" == "start-beam" ]]; then
     tmux set-environment -g TTS_PRM_GPU "$PRM_GPU"
     tmux set-environment -g TTS_POLICY_GPU_MEMORY_UTILIZATION "$POLICY_GPU_MEMORY_UTILIZATION"
     tmux set-environment -g TTS_MAX_MODEL_LENGTH "$MAX_MODEL_LENGTH"
-    for variable_name in TTS_SEED TTS_STRICT_DETERMINISM TTS_POLICY_MAX_CONCURRENCY TTS_PRM_MAX_CONCURRENCY HF_HOME HF_HUB_CACHE HF_ENDPOINT HF_HUB_OFFLINE PYTHONHASHSEED CUBLAS_WORKSPACE_CONFIG CUDA_DEVICE_MAX_CONNECTIONS NVIDIA_TF32_OVERRIDE ORCHES_TTS_SEED ORCHES_TTS_STRICT_DETERMINISM ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES; do
-        tmux set-environment -g "$variable_name" "${!variable_name}"
+    for variable_name in TTS_SEED TTS_STRICT_DETERMINISM TTS_POLICY_MAX_CONCURRENCY TTS_PRM_MAX_CONCURRENCY HF_HUB_OFFLINE TRANSFORMERS_OFFLINE PYTHONHASHSEED CUBLAS_WORKSPACE_CONFIG CUDA_DEVICE_MAX_CONNECTIONS NVIDIA_TF32_OVERRIDE ORCHES_TTS_SEED ORCHES_TTS_STRICT_DETERMINISM ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES ORCHES_MODELS_ROOT; do
+        tmux set-environment -g "$variable_name" "${!variable_name-}"
     done
     tmux has-session -t tts-controller 2>/dev/null ||
         tmux new-session -d -s tts-controller "bash '$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh' controller"

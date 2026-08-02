@@ -7,17 +7,9 @@ readonly SOURCE_DIR="$ROOT_DIR/third_party/compute-optimal-tts"
 readonly ENV_DIR="$ROOT_DIR/environments/tts"
 readonly PYTHON_BIN="${PYTHON_BIN:-$(uv python find --managed-python 3.10)}"
 readonly HF_CACHE="${ORCHES_TTS_CACHE:-$ROOT_DIR/models}"
-readonly HF_BIN="$ENV_DIR/.venv/bin/hf"
 readonly VLLM_WHEEL_URL="${ORCHES_VLLM_WHEEL_URL:-https://github.com/xxrrnn/orches/releases/download/whl/vllm-0.9.1-cp310-cp310-linux_x86_64.whl}"
 readonly VLLM_WHEEL="$ROOT_DIR/artifacts/vllm-sm120/vllm-0.9.1-cp310-cp310-linux_x86_64.whl"
 readonly VLLM_WHEEL_SHA256="937bd9dbfaadaf816c2857c7ae0e1b73bfe805a0c43af030ceb034f4132da74a"
-# 1.5B + 1.5B and 7B + 1.5B both use the Skywork verifier.
-readonly QWEN_MATH_1_5B="Qwen/Qwen2.5-Math-1.5B-Instruct"
-readonly QWEN_MATH_7B="Qwen/Qwen2.5-Math-7B-Instruct"
-readonly QWEN_0_5B="Qwen/Qwen2.5-0.5B-Instruct"
-readonly SKYWORK_PRM_1_5B="Skywork/Skywork-o1-Open-PRM-Qwen-2.5-1.5B"
-# The verifier-heavy 1.5B + 7B setting.
-readonly MATH_SHEPHERD_PRM_7B="peiyi9979/math-shepherd-mistral-7b-prm"
 readonly SOURCE_REVISION="0ee2578af1f8d6cac445c9c4c72780528bb94556"
 readonly PATCH_FILES=(
     "$ROOT_DIR/patches/compute-optimal-tts/001-tts-rtx50-compatibility.patch"
@@ -89,8 +81,7 @@ for PATCH_FILE in "${PATCH_FILES[@]}"; do
 done
 
 # Step 4: this Blackwell environment uses the pinned local vLLM wheel.
-mkdir -p "$(dirname "$VLLM_WHEEL")"
-if [[ ! -f "$VLLM_WHEEL" ]]; then
+download_vllm_wheel() {
     printf 'Downloading vLLM wheel:\n  %s\n  -> %s\n' "$VLLM_WHEEL_URL" "$VLLM_WHEEL"
     if command -v curl >/dev/null; then
         curl --fail --location --retry 3 --output "$VLLM_WHEEL" "$VLLM_WHEEL_URL"
@@ -99,33 +90,36 @@ if [[ ! -f "$VLLM_WHEEL" ]]; then
     else
         die "curl or wget is required to download $VLLM_WHEEL_URL"
     fi
+}
+
+verify_vllm_wheel() {
+    local actual_sha256
+    actual_sha256="$(sha256sum "$VLLM_WHEEL" | awk '{print $1}')"
+    [[ "$actual_sha256" == "$VLLM_WHEEL_SHA256" ]] || {
+        printf 'warning: unexpected SHA256 for %s\n' "$VLLM_WHEEL" >&2
+        printf '  expected: %s\n' "$VLLM_WHEEL_SHA256" >&2
+        printf '  actual:   %s\n' "$actual_sha256" >&2
+        return 1
+    }
+    unzip -tq "$VLLM_WHEEL" >/dev/null 2>&1 || {
+        printf 'warning: %s is not a valid wheel archive\n' "$VLLM_WHEEL" >&2
+        return 1
+    }
+}
+
+mkdir -p "$(dirname "$VLLM_WHEEL")"
+if [[ ! -f "$VLLM_WHEEL" ]] || ! verify_vllm_wheel; then
+    [[ -f "$VLLM_WHEEL" ]] && rm -f "$VLLM_WHEEL"
+    download_vllm_wheel
 fi
-[[ "$(sha256sum "$VLLM_WHEEL" | awk '{print $1}')" == "$VLLM_WHEEL_SHA256" ]] ||
-    die "unexpected SHA256 for $VLLM_WHEEL"
+verify_vllm_wheel || die "vLLM wheel download failed verification for $VLLM_WHEEL"
 
 # Step 5: install the locked Python environment.
 mkdir -p "$HF_CACHE"
 uv sync --directory "$ENV_DIR" --frozen --python "$PYTHON_BIN"
 
-# Step 6: download the exact model weights used by the requested paper-scale
-# configurations. Use hf-mirror by default, but allow overriding:
-#   HF_ENDPOINT=https://huggingface.co bash scripts/1_env_compute_optimal_tts.sh
-export HF_HOME="$HF_CACHE"
-export HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost"
-export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost"
-
-# Download the local models used by the example and paper-scale configurations:
-#   0.5B + 1.5B: Qwen2.5-0.5B      + Skywork-o1-PRM-1.5B
-#   1.5B + 1.5B: Qwen2.5-Math-1.5B + Skywork-o1-PRM-1.5B
-#   1.5B + 7B:   Qwen2.5-Math-1.5B + Math-Shepherd-Mistral-7B-PRM
-#   7B + 1.5B:   Qwen2.5-Math-7B   + Skywork-o1-PRM-1.5B
-"$HF_BIN" download "$QWEN_0_5B" --cache-dir "$HF_HUB_CACHE"
-"$HF_BIN" download "$QWEN_MATH_1_5B" --cache-dir "$HF_HUB_CACHE"
-"$HF_BIN" download "$QWEN_MATH_7B" --cache-dir "$HF_HUB_CACHE"
-"$HF_BIN" download "$SKYWORK_PRM_1_5B" --cache-dir "$HF_HUB_CACHE"
-"$HF_BIN" download "$MATH_SHEPHERD_PRM_7B" --cache-dir "$HF_HUB_CACHE"
+# Step 6: download model weights into models/<short-name>/ trees.
+bash "$ROOT_DIR/scripts/download_models.sh"
 
 # Step 7: verify the bundled smoke-test dataset is present.
 # The AIME24, AMC23, and MATH-500 JSONL assets used by the upstream evaluator
@@ -134,4 +128,4 @@ readonly AIME24_DATASET="$SOURCE_DIR/src/envs/MATH/dataset/test_aime.jsonl"
 [[ -s "$AIME24_DATASET" ]] || die "missing bundled AIME24 smoke dataset: $AIME24_DATASET"
 
 printf '\nCompute-Optimal-TTS bootstrap complete.\n'
-printf 'Environment: %s\nHF_HOME: %s\nHF_HUB_CACHE: %s\nAIME24: %s\n' "$ENV_DIR" "$HF_HOME" "$HF_HUB_CACHE" "$AIME24_DATASET"
+printf 'Environment: %s\nModels: %s\nAIME24: %s\n' "$ENV_DIR" "$HF_CACHE" "$AIME24_DATASET"
