@@ -6,6 +6,135 @@ Compute-Optimal-TTS 的 baseline beam search 已插入可复现 trace。它记�
 policy 生成、Skywork PRM reward、beam selection 与最终正确性；不包含 Duplex、
 AttAcc 或 ORCHES 的调度优化。这个 trace 可作为修改后的 Duplex/AttAcc 的输入。
 
+## ORCHES 论文复现实验矩阵
+
+本节只记录可以从 [paper/orches.pdf](/home/xrn/projects/pim/orches/paper/orches.pdf)
+直接获得的实验信息。论文把 text pipeline 归因于 [18]、vision pipeline 归因于
+[36]；未在论文中给出而必须从原算法/代码补齐的字段集中列在最后。这里的“宽度”是
+search-tree width/branch count，应映射到 trace 的 `tree_max_width`，不是 beam size。
+
+### 系统、模拟器和比较对象
+
+| 项目 | 论文明确设置 | 复现含义 |
+| --- | --- | --- |
+| GPU baseline | NVIDIA AGX Orin | 作为 GPU-normalized speedup 与能效的分母。 |
+| PIM | 每 bank 16 个 multiplier/adder；总容量 32 GB；2048 banks | PIM 总容量由 edge 约束缩小，但仍满足全部 benchmark 的内存需求。 |
+| 片外带宽 | 204.8 GB/s，与 AGX Orin 匹配 | 作为 simulator 的 off-chip bandwidth。 |
+| SoC 带宽 sweep | 可用 SoC memory bandwidth 的 100%、75%、50% | 图 11 和文本实验必须分别跑三档，而不是只跑满带宽。 |
+| Simulator | 扩展开源 AttAcc；使用修改版 Ramulator2；前端负责 task scheduling、后端负责 PIM memory simulation | AttAcc 是 ORCHES simulator 的基础；Duplex 是比较的 baseline。 |
+| 比较对象 | standalone GPU、AttAcc、Duplex、ORCHES | 不同技术的 PIM mapping、prediction 与 memory structuring 开关必须隔离。 |
+| unit latency/energy | 延续先前 AttAcc 工作已验证的 GPU/PIM unit latency 与 energy | 系统能耗由计数器统计的数据移动量和各类计算数乘以 unit energy 得到。 |
+
+### 工作负载与模型矩阵
+
+| 实验/论文位置 | Policy（生成） | Reward / PRM（验证） | Benchmark | 搜索与宽度 | 论文明确的额外条件 | 最小复现实验 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Text 主实验，图 11、表 1、表 5 | `Llama3.2-1B`、`Qwen2.5-1.5B`、`Qwen2.5-3B` | `Qwen2.5-1.5B-PRM-Tuned`、`Qwen2.5-7B-PRM-Tuned`、`Llama3.1-8B-PRM-Tuned` | MATH500 | Beam search；全部 `3 x 3 = 9` model pairs；branch count `2..8` | policy/PRM 组合在 [18] 中的 generation quality 可与或超过 Llama3.1-405B；对每个配置扫 100/75/50% SoC bandwidth | `9 x 7 x 3 = 189` 个 trace/replay 配置，再对每个配置运行 GPU、AttAcc、Duplex、ORCHES。 |
+| Text 泛化，表 2 | 论文说明沿用 text TTC pipeline，但未逐项指定 policy | 未逐项指定 PRM；表的列是 Qwen2.5-1.5B、Qwen2.5-7B、Llama3.1-8B | LiveCodeBench | 表中 width `2`、`4` | 扫 100/75/50% bandwidth | 在未取得原始配置前，先使用主实验 3x3 矩阵；不要猜测某个 policy/PRM 子集。 |
+| Vision 主实验，表 3 | Fine-tuned `Llama-3.2-11B-Vision-Instruct` | 同一 fine-tuned `Llama-3.2-11B-Vision-Instruct` | MATHVista | TTC vision pipeline；width `2`、`4` | 论文称该 pipeline 超过 GPT-4o-mini、Llama-3.2-90B-Vision-Instruct 等较大模型 | 每个 width 采集/重放一个 policy=PRM 的 vision trace，并按 short/medium/long question 分组。 |
+| T1 assignment 消融，图 12、5.3 节 | `Qwen2.5-3B` | `Qwen2.5-7B-PRM-Tuned` | MATH500 | 随 search width 变化 | 关闭 T2；比 GPU、AttAcc、ORCHES-A、B、C | 运行 A/B/C 的同一组 trace，避免以不同 branch 结果比较 assignment。 |
+| T2 case study，图 13 | `Llama3.2-1B`，或 `Qwen2.5-3B` | `Llama3.1-8B-PRM-Tuned` | MATH500 | 文本 beam-search pipeline；宽度未单列 | small PRM 是原 8B PRM 的前 10 层；large PRM 是其余层；示例预测 50 或 52 tokens，示例并行预执行 small PRM 的 60% | 记录 prediction、speculative work、squash、实际 overlap 和每段 token 数。 |
+| T1/T2 组合消融，表 6、5.6 节 | `Qwen2.5-3B` | 三种：Qwen2.5-1.5B、Qwen2.5-7B、Llama3.1-8B PRM | MATH500 | question difficulty 平均；宽度未单列 | 比 T1 only、T2 only、T1+T2 | 对每个 PRM 跑三个 feature 配置，且维持同一模型、trace 和硬件。 |
+| T3 memory structuring，表 5、5.5 节 | Llama3.2-1B、Qwen2.5-1.5B、Qwen2.5-3B | Qwen2.5-1.5B、Qwen2.5-7B、Llama3.1-8B PRM | MATH500 | 与 text 主实验相同的设置 | 仅 selected branch 继续执行；每 3--5 个 reasoning step/PRM verification 重整一次 | 记录 context-KV footprint、碎片、搬移字节、buffer 面积与 runtime overhead。 |
+
+### Figure 11 的 baseline 标注
+
+| 图 11 列 | Policy 行 | PRM 标注 | 带宽 | 比较指标 |
+| --- | --- | --- | --- | --- |
+| ORCHES | Llama3.2-1B、Qwen2.5-1.5B、Qwen2.5-3B | Qwen2.5-1.5B | 100%、75%、50% | 相对 AGX Orin GPU 的 normalized speedup。 |
+| Baseline-AttAcc | 同上三种 policy | Qwen2.5-7B | 100%、75%、50% | 相对 GPU 的 normalized speedup。 |
+| Baseline-Duplex | 同上三种 policy | Llama3.1-8B | 100%、75%、50% | 相对 GPU 的 normalized speedup。 |
+
+论文图 11 为不同 PRM 尺寸的系统列分别标注 PRM，不应把它误读为严格同一 model pair
+下的 AttAcc-vs-Duplex 对比。复现报告必须保留每列实际 policy、PRM 与带宽。
+
+### 论文报告的数值结果
+
+| 指标 | 论文数值 |
+| --- | --- |
+| Text 平均 speedup | ORCHES 相对 GPU 平均 `4.16x`。 |
+| Text 平均能效 | ORCHES 相对 GPU 平均 `2.45x`；表 1 数值如下。 |
+| LiveCodeBench 平均 speedup | ORCHES 相对 GPU 平均 `4.24x`；表 2 数值如下。 |
+| Vision 平均 speedup | ORCHES 相对 GPU 平均 `3.10x`；short/medium/long 的范围为 `2.32x..4.85x`。 |
+| T1 assignment 消融 | ORCHES 平均相对 GPU `3x`、相对 AttAcc `1.5x`；AttAcc 本身相对 GPU `2x`。 |
+| T2 predictor | 历史对齐前平均 prediction accuracy 约 `52%`，后约 `78%`。 |
+| T3 memory | context-memory footprint 平均节省 `65%`；新增 buffer area `12%`；平均 runtime overhead `0.12%`。 |
+| T1/T2 utilization | GPU：T1 `97.9%`、T2 `62.2%`、T1+T2 `93.21%`；PIM：`43.6%`、`66.7%`、`61.0%`。 |
+
+#### 表 1：相对 GPU 的能效（MATH500，平均于 width 与 question length）
+
+| PRM \ Policy | Llama3.2-1B | Qwen2.5-1.5B | Qwen2.5-3B |
+| --- | ---: | ---: | ---: |
+| Qwen2.5-1.5B | 1.96x | 2.07x | 1.87x |
+| Qwen2.5-7B | 3.23x | 2.57x | 2.14x |
+| Llama3.1-8B | 3.40x | 2.71x | 2.13x |
+
+#### 表 2：相对 GPU 的 LiveCodeBench speedup
+
+| 可用 SoC 带宽 \ PRM | Qwen2.5-1.5B | Qwen2.5-7B | Llama3.1-8B |
+| --- | ---: | ---: | ---: |
+| 100% | 3.85x | 3.19x | 2.73x |
+| 75% | 4.98x | 3.77x | 3.27x |
+| 50% | 6.93x | 5.10x | 4.31x |
+
+#### 表 3：相对 GPU 的 MATHVista speedup
+
+| Search width | Short QA | Medium QA | Long QA |
+| --- | ---: | ---: | ---: |
+| 2 | 3.26x | 3.35x | 4.85x |
+| 4 | 2.47x | 2.35x | 2.32x |
+
+#### 表 4：history alignment 前后 branch-prediction accuracy（MATH500）
+
+| 难度 | Llama3.2-1B policy | Qwen2.5-1.5B policy | Qwen2.5-3B policy |
+| --- | ---: | ---: | ---: |
+| Level 1 | 51.4% -> 73.3% | 56.1% -> 82.4% | 61.1% -> 79.5% |
+| Level 2 | 50.7% -> 80.1% | 56.8% -> 82.6% | 61.5% -> 79.2% |
+| Level 3 | 53.2% -> 82.2% | 57.5% -> 82.8% | 59.9% -> 79.5% |
+| Level 4 | 52.7% -> 82.3% | 57.7% -> 83.1% | 59.7% -> 79.6% |
+| Level 5 | 52.6% -> 83.0% | 57.9% -> 83.1% | 59.8% -> 80.3% |
+
+#### 表 5：T3 context-memory footprint saving（MATH500）
+
+| PRM \ Policy | Llama3.2-1B | Qwen2.5-1.5B | Qwen2.5-3B |
+| --- | ---: | ---: | ---: |
+| Qwen2.5-1.5B | 63% | 68% | 67% |
+| Qwen2.5-7B | 64% | 71% | 65% |
+| Llama3.1-8B | 66% | 78% | 65% |
+
+#### 表 6：T1/T2 相对 GPU speedup（MATH500，policy Qwen2.5-3B）
+
+| 配置 \ PRM | Qwen2.5-1.5B | Qwen2.5-7B | Llama3.1-8B |
+| --- | ---: | ---: | ---: |
+| T1 only | 4.1x | 2.9x | 3.1x |
+| T2 only | 3.1x | 2.8x | 2.9x |
+| T1 + T2 | 4.4x | 3.2x | 3.4x |
+
+### TTS trace 必须记录的论文动态性
+
+| 论文机制 | 可直接得到的运行规则 | trace/simulator 必须记录 |
+| --- | --- | --- |
+| Variable parallelism | policy 是 token-by-token decoding；PRM 主要是 prefill；shared 和 unique KV 同时存在，且 shared:unique 比例随 search depth 变化 | 每 token active branch batch、每 branch context length、policy/PRM 事件依赖、shared/private KV 字节。 |
+| T1 offline assignment | 小 batch：linear 与全部 attention 放 PIM；中 batch：GPU 跑 shared-KV query、PIM 跑 linear 和 unique-KV query；大 batch：GPU 跑 linear 与 shared attention、PIM 跑 unique-KV query | 每 event 的 batch、shared/unique KV 分解、GPU/PIM/通信时间与 assignment。 |
+| T1 online compensation | shared KV 会随 step 累积；在每个 reasoning step 计算并动态调整 GPU/PIM 分割 | 每步分割比例、队列时间、数据传输；论文称 transfer 平均约占总 runtime 的 8.3%。 |
+| T2 prediction/pipeline | small PRM 预测下一步会被保留的 branch；历史 alignment 用 large PRM 历史 score 替换 small PRM 历史 score；可与 generation 重叠 verification | predictor score、预测 branch、large-PRM 最终选择、speculation 的已执行 token、squash 与 overlap。 |
+| T3 memory structuring | 剪枝后只保留 selected branches；将 isolated context data 合并以恢复连续存储；每 3--5 step 重整 | parent-child KV page ownership、refcount、prune、物理地址、碎片、compaction bytes/time/energy。 |
+
+### 论文没有披露、不得猜测的参数
+
+| 参数 | 论文状态 | 复现要求 |
+| --- | --- | --- |
+| Text beam size | 仅说明 beam search，未给独立数值 | 从 [18] 或作者代码确认，写入 `TTS_BEAM_SIZE` 和 manifest。 |
+| Text search depth | 未给独立数值 | 从 [18] 或作者代码确认，写入 `TTS_TREE_MAX_DEPTH`。 |
+| 每个 benchmark 的 prompt、temperature、top-p/top-k、max tokens、seed | 未给 | 与原 pipeline 同步；全部冻结并纳入 trace。 |
+| LiveCodeBench 使用的具体 policy | 表 2 未列出 | 在报告前从原始配置确认；当前不能由表 2 的 PRM 列反推。 |
+| MATHVista 的独立 beam/depth、prompt 与 decoding 参数 | 未给 | 从 [36] 或作者代码确认。 |
+| 详细 AGX Orin compute/memory clock、PIM timing/energy table | 论文只给出上述摘要与“沿用 prior work” | 从 AttAcc/ORCHES 实现和引用 [25] 补齐，不能以本机 A100/H100 参数代替。 |
+
+当前仓库的 `Qwen2.5-Math-1.5B-Instruct + Skywork-1.5B` AIME24 trace 仅是 adapter
+smoke test；其 `beam=1`、`width=4`、`depth=4` 不属于论文配置，不能替代上表中未披露
+的 beam/depth。
+
 ### Reproducibility
 
 trace run 默认启用严格确定性模式（`TTS_STRICT_DETERMINISM=1`）。必须固定
