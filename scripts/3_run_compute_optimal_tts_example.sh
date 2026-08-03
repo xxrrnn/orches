@@ -43,6 +43,19 @@ CONTROLLER_PORT="${TTS_CONTROLLER_PORT:-10014}"
 POLICY_PORT="${TTS_POLICY_PORT:-10082}"
 PRM_PORT="${TTS_PRM_PORT:-10081}"
 
+# Optional isolated stack name for parallel multi-GPU runs, e.g. TTS_INSTANCE=lane0.
+# Default keeps the historical tmux session names used by existing scripts.
+TTS_INSTANCE="${TTS_INSTANCE:-}"
+if [[ -n "$TTS_INSTANCE" ]]; then
+    TMUX_CONTROLLER="tts-${TTS_INSTANCE}-controller"
+    TMUX_POLICY="tts-${TTS_INSTANCE}-policy"
+    TMUX_PRM="tts-${TTS_INSTANCE}-prm"
+else
+    TMUX_CONTROLLER="tts-controller"
+    TMUX_POLICY="tts-policy"
+    TMUX_PRM="tts-prm"
+fi
+
 POLICY_GPU="${TTS_POLICY_GPU:-0}"
 PRM_GPU="${TTS_PRM_GPU:-0}"
 
@@ -79,6 +92,19 @@ TTS_DETERMINISM_FIXTURE="${TTS_DETERMINISM_FIXTURE:-$ROOT_DIR/traces/Qwen1.5/Sky
 SAVE_BASE_DIR="${TTS_SAVE_BASE_DIR:-/tmp/orches-tts-runs}"
 TRACE_BASE_DIR="${TTS_TRACE_BASE_DIR:-$ROOT_DIR/traces}"
 SAVE_DIR="${TTS_SAVE_DIR:-}"
+HF_HOME="${HF_HOME:-$ROOT_DIR/models}"
+HF_HUB_CACHE="${HF_HUB_CACHE:-$HF_HOME/hub}"
+HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
+SERVER_ALIAS="${ORCHES_TTS_SERVER_ALIAS:-${TTS_SERVER_ALIAS:-5090}}"
+if [[ -n "${ORCHES_TTS_SERVER_SSH_URL:-}" ]]; then
+    SERVER_SSH_URL="$ORCHES_TTS_SERVER_SSH_URL"
+elif [[ -n "${TTS_SERVER_SSH_URL:-}" ]]; then
+    SERVER_SSH_URL="$TTS_SERVER_SSH_URL"
+else
+    SERVER_USER="${USER:-$(id -un 2>/dev/null || printf unknown)}"
+    SERVER_HOST="$(hostname -f 2>/dev/null || hostname 2>/dev/null || printf unknown)"
+    SERVER_SSH_URL="$SERVER_USER@$SERVER_HOST"
+fi
 
 COMMAND="${1:-cot}"
 
@@ -106,12 +132,32 @@ export NVIDIA_TF32_OVERRIDE="${NVIDIA_TF32_OVERRIDE:-0}"
 export ORCHES_TTS_SEED="$TTS_SEED"
 export ORCHES_TTS_STRICT_DETERMINISM="$TTS_STRICT_DETERMINISM"
 export ORCHES_TTS_SOURCE_REVISION="${ORCHES_TTS_SOURCE_REVISION:-0ee2578af1f8d6cac445c9c4c72780528bb94556}"
-export ORCHES_TTS_PATCH_SERIES="${ORCHES_TTS_PATCH_SERIES:-001-tts-rtx50-compatibility,002-tts-baseline-tracing,003-vllm-multisample-aggregation,004-compact-output-token-text,005-reward-score-alias,006-software-candidate-token-lengths,007-tts-strict-determinism}"
+export ORCHES_TTS_PATCH_SERIES="${ORCHES_TTS_PATCH_SERIES:-001-tts-rtx50-compatibility,002-tts-baseline-tracing,003-vllm-multisample-aggregation,004-compact-output-token-text,005-reward-score-alias,006-software-candidate-token-lengths,007-tts-strict-determinism,008-tts-prm-controller-routing}"
+export ORCHES_TTS_SERVER_ALIAS="$SERVER_ALIAS"
+export ORCHES_TTS_SERVER_SSH_URL="$SERVER_SSH_URL"
 export ORCHES_RAY_LOCAL_IP="${ORCHES_RAY_LOCAL_IP:-127.0.0.1}"
 export NO_PROXY="${NO_PROXY:+$NO_PROXY,}127.0.0.1,localhost,0.0.0.0"
 export no_proxy="${no_proxy:+$no_proxy,}127.0.0.1,localhost,0.0.0.0"
 
 mkdir -p "$LOGDIR"
+
+gpu_query() {
+    local gpu_index="$1"
+    local query_field="$2"
+    command -v nvidia-smi >/dev/null 2>&1 || return 0
+    nvidia-smi --id="$gpu_index" --query-gpu="$query_field" --format=csv,noheader,nounits 2>/dev/null |
+        head -n 1 |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+export ORCHES_TTS_POLICY_GPU_INDEX="$POLICY_GPU"
+export ORCHES_TTS_POLICY_GPU_UUID="${ORCHES_TTS_POLICY_GPU_UUID:-$(gpu_query "$POLICY_GPU" uuid)}"
+export ORCHES_TTS_POLICY_GPU_NAME="${ORCHES_TTS_POLICY_GPU_NAME:-$(gpu_query "$POLICY_GPU" name)}"
+export ORCHES_TTS_POLICY_GPU_PCI_BUS_ID="${ORCHES_TTS_POLICY_GPU_PCI_BUS_ID:-$(gpu_query "$POLICY_GPU" pci.bus_id)}"
+export ORCHES_TTS_PRM_GPU_INDEX="$PRM_GPU"
+export ORCHES_TTS_PRM_GPU_UUID="${ORCHES_TTS_PRM_GPU_UUID:-$(gpu_query "$PRM_GPU" uuid)}"
+export ORCHES_TTS_PRM_GPU_NAME="${ORCHES_TTS_PRM_GPU_NAME:-$(gpu_query "$PRM_GPU" name)}"
+export ORCHES_TTS_PRM_GPU_PCI_BUS_ID="${ORCHES_TTS_PRM_GPU_PCI_BUS_ID:-$(gpu_query "$PRM_GPU" pci.bus_id)}"
 
 prepare_trace_run() {
     [[ -n "$TTS_RUN_ID" ]] || {
@@ -161,7 +207,7 @@ verify_determinism() {
         printf 'error: determinism fixture is missing: %s\n' "$TTS_DETERMINISM_FIXTURE" >&2
         exit 1
     }
-    "$PYTHON" "$ROOT_DIR/scripts/5_verify_tts_determinism.py" \
+    "$PYTHON" "$ROOT_DIR/scripts/test/5_verify_tts_determinism.py" \
         --fixture "$TTS_DETERMINISM_FIXTURE" \
         --policy-address "http://$HOST_ADDR:$POLICY_PORT" \
         --prm-address "http://$HOST_ADDR:$PRM_PORT"
@@ -208,30 +254,106 @@ if [[ "$COMMAND" == "prm-worker" ]]; then
 fi
 
 if [[ "$COMMAND" == "start-cot" || "$COMMAND" == "start-beam" ]]; then
-    # tmux keeps a server-wide environment.  Set the run-specific values there
-    # explicitly so detached workers receive the requested model pair and GPU
-    # assignments rather than values from an earlier tmux server.
-    tmux set-environment -g TTS_POLICY_MODEL "$POLICY_MODEL"
-    tmux set-environment -g TTS_PRM_MODEL "$PRM_MODEL"
-    tmux set-environment -g TTS_POLICY_GPU "$POLICY_GPU"
-    tmux set-environment -g TTS_PRM_GPU "$PRM_GPU"
-    tmux set-environment -g TTS_POLICY_GPU_MEMORY_UTILIZATION "$POLICY_GPU_MEMORY_UTILIZATION"
-    tmux set-environment -g TTS_MAX_MODEL_LENGTH "$MAX_MODEL_LENGTH"
-    for variable_name in TTS_SEED TTS_STRICT_DETERMINISM TTS_POLICY_MAX_CONCURRENCY TTS_PRM_MAX_CONCURRENCY HF_HUB_OFFLINE TRANSFORMERS_OFFLINE PYTHONHASHSEED CUBLAS_WORKSPACE_CONFIG CUDA_DEVICE_MAX_CONNECTIONS NVIDIA_TF32_OVERRIDE ORCHES_TTS_SEED ORCHES_TTS_STRICT_DETERMINISM ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES ORCHES_MODELS_ROOT; do
-        tmux set-environment -g "$variable_name" "${!variable_name-}"
-    done
-    tmux has-session -t tts-controller 2>/dev/null ||
-        tmux new-session -d -s tts-controller "bash '$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh' controller"
-
-    tmux has-session -t tts-policy 2>/dev/null ||
-        tmux new-session -d -s tts-policy "bash '$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh' policy-worker"
-
-    if [[ "$COMMAND" == "start-beam" ]]; then
-        tmux has-session -t tts-prm 2>/dev/null ||
-            tmux new-session -d -s tts-prm "bash '$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh' prm-worker"
+    # Pass worker config on the session command line so parallel TTS_INSTANCE
+    # stacks do not race on tmux's server-wide environment.  For the legacy
+    # single-stack path (empty TTS_INSTANCE), also publish globals so older
+    # helper scripts can introspect runtime config via `tmux show-environment`.
+    if [[ -z "$TTS_INSTANCE" ]]; then
+        tmux set-environment -g TTS_POLICY_MODEL "$POLICY_MODEL"
+        tmux set-environment -g TTS_PRM_MODEL "$PRM_MODEL"
+        tmux set-environment -g TTS_POLICY_GPU "$POLICY_GPU"
+        tmux set-environment -g TTS_PRM_GPU "$PRM_GPU"
+        tmux set-environment -g TTS_POLICY_GPU_MEMORY_UTILIZATION "$POLICY_GPU_MEMORY_UTILIZATION"
+        tmux set-environment -g TTS_MAX_MODEL_LENGTH "$MAX_MODEL_LENGTH"
+        for variable_name in TTS_SEED TTS_STRICT_DETERMINISM TTS_POLICY_MAX_CONCURRENCY TTS_PRM_MAX_CONCURRENCY HF_HOME HF_HUB_CACHE HF_ENDPOINT HF_HUB_OFFLINE PYTHONHASHSEED CUBLAS_WORKSPACE_CONFIG CUDA_DEVICE_MAX_CONNECTIONS NVIDIA_TF32_OVERRIDE ORCHES_TTS_SEED ORCHES_TTS_STRICT_DETERMINISM ORCHES_RAY_LOCAL_IP ORCHES_TTS_SOURCE_REVISION ORCHES_TTS_PATCH_SERIES ORCHES_TTS_SERVER_ALIAS ORCHES_TTS_SERVER_SSH_URL ORCHES_TTS_POLICY_GPU_INDEX ORCHES_TTS_POLICY_GPU_UUID ORCHES_TTS_POLICY_GPU_NAME ORCHES_TTS_POLICY_GPU_PCI_BUS_ID ORCHES_TTS_PRM_GPU_INDEX ORCHES_TTS_PRM_GPU_UUID ORCHES_TTS_PRM_GPU_NAME ORCHES_TTS_PRM_GPU_PCI_BUS_ID; do
+            tmux set-environment -g "$variable_name" "${!variable_name}"
+        done
     fi
 
-    printf 'Started tmux services. Wait until the workers finish loading, then run:\n'
+    worker_env=(
+        "TTS_INSTANCE=$TTS_INSTANCE"
+        "TTS_HOST_ADDR=$HOST_ADDR"
+        "TTS_CONTROLLER_PORT=$CONTROLLER_PORT"
+        "TTS_POLICY_PORT=$POLICY_PORT"
+        "TTS_PRM_PORT=$PRM_PORT"
+        "TTS_POLICY_MODEL=$POLICY_MODEL"
+        "TTS_PRM_MODEL=$PRM_MODEL"
+        "TTS_POLICY_GPU=$POLICY_GPU"
+        "TTS_PRM_GPU=$PRM_GPU"
+        "TTS_POLICY_GPU_MEMORY_UTILIZATION=$POLICY_GPU_MEMORY_UTILIZATION"
+        "TTS_MAX_MODEL_LENGTH=$MAX_MODEL_LENGTH"
+        "TTS_MAX_NEW_TOKENS=$MAX_NEW_TOKENS"
+        "TTS_SEED=$TTS_SEED"
+        "TTS_STRICT_DETERMINISM=$TTS_STRICT_DETERMINISM"
+        "TTS_POLICY_MAX_CONCURRENCY=$TTS_POLICY_MAX_CONCURRENCY"
+        "TTS_PRM_MAX_CONCURRENCY=$TTS_PRM_MAX_CONCURRENCY"
+        "HF_HOME=$HF_HOME"
+        "HF_HUB_CACHE=$HF_HUB_CACHE"
+        "HF_ENDPOINT=$HF_ENDPOINT"
+        "HF_HUB_OFFLINE=${HF_HUB_OFFLINE:-1}"
+        "PYTHONHASHSEED=$PYTHONHASHSEED"
+        "CUBLAS_WORKSPACE_CONFIG=$CUBLAS_WORKSPACE_CONFIG"
+        "CUDA_DEVICE_MAX_CONNECTIONS=$CUDA_DEVICE_MAX_CONNECTIONS"
+        "NVIDIA_TF32_OVERRIDE=$NVIDIA_TF32_OVERRIDE"
+        "ORCHES_TTS_SEED=$ORCHES_TTS_SEED"
+        "ORCHES_TTS_STRICT_DETERMINISM=$ORCHES_TTS_STRICT_DETERMINISM"
+        "ORCHES_RAY_LOCAL_IP=$ORCHES_RAY_LOCAL_IP"
+        "ORCHES_TTS_SOURCE_REVISION=$ORCHES_TTS_SOURCE_REVISION"
+        "ORCHES_TTS_PATCH_SERIES=$ORCHES_TTS_PATCH_SERIES"
+        "ORCHES_TTS_SERVER_ALIAS=$ORCHES_TTS_SERVER_ALIAS"
+        "ORCHES_TTS_SERVER_SSH_URL=$ORCHES_TTS_SERVER_SSH_URL"
+        "ORCHES_TTS_POLICY_GPU_INDEX=$ORCHES_TTS_POLICY_GPU_INDEX"
+        "ORCHES_TTS_POLICY_GPU_UUID=$ORCHES_TTS_POLICY_GPU_UUID"
+        "ORCHES_TTS_POLICY_GPU_NAME=$ORCHES_TTS_POLICY_GPU_NAME"
+        "ORCHES_TTS_POLICY_GPU_PCI_BUS_ID=$ORCHES_TTS_POLICY_GPU_PCI_BUS_ID"
+        "ORCHES_TTS_PRM_GPU_INDEX=$ORCHES_TTS_PRM_GPU_INDEX"
+        "ORCHES_TTS_PRM_GPU_UUID=$ORCHES_TTS_PRM_GPU_UUID"
+        "ORCHES_TTS_PRM_GPU_NAME=$ORCHES_TTS_PRM_GPU_NAME"
+        "ORCHES_TTS_PRM_GPU_PCI_BUS_ID=$ORCHES_TTS_PRM_GPU_PCI_BUS_ID"
+    )
+    worker_env_prefix="$(printf '%q ' "${worker_env[@]}")"
+
+    tmux has-session -t "$TMUX_CONTROLLER" 2>/dev/null ||
+        tmux new-session -d -s "$TMUX_CONTROLLER" \
+            "${worker_env_prefix}bash $(printf '%q' "$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh") controller"
+
+    tmux has-session -t "$TMUX_POLICY" 2>/dev/null ||
+        tmux new-session -d -s "$TMUX_POLICY" \
+            "${worker_env_prefix}bash $(printf '%q' "$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh") policy-worker"
+
+    if [[ "$COMMAND" == "start-beam" && "$POLICY_GPU" == "$PRM_GPU" && "${TTS_START_POLICY_FIRST:-1}" == "1" ]]; then
+        # On 32GB cards, the large PRM pairs are tight.  Let vLLM allocate its
+        # KV cache first, then load the reward model into the remaining memory.
+        ready=0
+        for attempt in $(seq 1 90); do
+            if curl --silent --request POST --header 'Content-Type: application/json' --data '{}' \
+                "http://$HOST_ADDR:$CONTROLLER_PORT/list_models" | grep -F "$POLICY_MODEL" >/dev/null; then
+                ready=1
+                break
+            fi
+            if ! tmux has-session -t "$TMUX_POLICY" 2>/dev/null; then
+                printf 'error: policy worker exited before registering: %s\n' "$TMUX_POLICY" >&2
+                tmux has-session -t "$TMUX_CONTROLLER" 2>/dev/null &&
+                    tmux capture-pane -pt "$TMUX_CONTROLLER:0" -S -80 >&2
+                exit 1
+            fi
+            sleep 2
+        done
+        (( ready )) || {
+            printf 'error: timed out waiting for policy worker to register before PRM start\n' >&2
+            exit 1
+        }
+    fi
+
+    if [[ "$COMMAND" == "start-beam" ]]; then
+        tmux has-session -t "$TMUX_PRM" 2>/dev/null ||
+            tmux new-session -d -s "$TMUX_PRM" \
+                "${worker_env_prefix}bash $(printf '%q' "$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh") prm-worker"
+    fi
+
+    printf 'Started tmux services'
+    [[ -n "$TTS_INSTANCE" ]] && printf ' (instance=%s)' "$TTS_INSTANCE"
+    printf '. Wait until the workers finish loading, then run:\n'
     if [[ "$COMMAND" == "start-beam" ]]; then
         printf '  TTS_RUN_ID=baseline-seed0 TTS_SEED=0 bash scripts/3_run_compute_optimal_tts_example.sh run-beam\n'
     else
@@ -261,6 +383,7 @@ if [[ "$COMMAND" == "run-cot" || "$COMMAND" == "cot" ]]; then
         --method cot \
         --num_worker 1 \
         --controller_addr "http://$HOST_ADDR:$CONTROLLER_PORT" \
+        --multi_gpu \
         --add_step_prompt \
         --question_parallel_num 1 \
         --question_max_num "$TTS_QUESTION_MAX_NUM" \
@@ -289,6 +412,7 @@ if [[ "$COMMAND" == "run-beam" || "$COMMAND" == "beam" ]]; then
         --method beam_search \
         --num_worker 1 \
         --controller_addr "http://$HOST_ADDR:$CONTROLLER_PORT" \
+        --multi_gpu \
         --add_step_prompt \
         --question_parallel_num 1 \
         --question_max_num "$TTS_QUESTION_MAX_NUM" \
@@ -304,8 +428,12 @@ if [[ "$COMMAND" == "verify-determinism" ]]; then
 fi
 
 if [[ "$COMMAND" == "status" ]]; then
-    tmux ls 2>/dev/null | grep -E '^tts-' || true
-    printf '\nController models:\n'
+    if [[ -n "$TTS_INSTANCE" ]]; then
+        tmux ls 2>/dev/null | grep -E "^tts-${TTS_INSTANCE}-" || true
+    else
+        tmux ls 2>/dev/null | grep -E '^tts-' || true
+    fi
+    printf '\nController models (%s:%s):\n' "$HOST_ADDR" "$CONTROLLER_PORT"
     curl --silent --show-error \
         --request POST \
         --header 'Content-Type: application/json' \
@@ -316,7 +444,7 @@ if [[ "$COMMAND" == "status" ]]; then
 fi
 
 if [[ "$COMMAND" == "logs" ]]; then
-    for session in tts-controller tts-policy tts-prm; do
+    for session in "$TMUX_CONTROLLER" "$TMUX_POLICY" "$TMUX_PRM"; do
         if tmux has-session -t "$session" 2>/dev/null; then
             printf '\n===== %s =====\n' "$session"
             tmux capture-pane -pt "$session:0" -S -80
@@ -326,10 +454,14 @@ if [[ "$COMMAND" == "logs" ]]; then
 fi
 
 if [[ "$COMMAND" == "stop" ]]; then
-    tmux kill-session -t tts-controller 2>/dev/null || true
-    tmux kill-session -t tts-policy 2>/dev/null || true
-    tmux kill-session -t tts-prm 2>/dev/null || true
-    printf 'Stopped TTS demo tmux sessions.\n'
+    tmux kill-session -t "$TMUX_CONTROLLER" 2>/dev/null || true
+    tmux kill-session -t "$TMUX_POLICY" 2>/dev/null || true
+    tmux kill-session -t "$TMUX_PRM" 2>/dev/null || true
+    if [[ -n "$TTS_INSTANCE" ]]; then
+        printf 'Stopped TTS tmux sessions for instance=%s.\n' "$TTS_INSTANCE"
+    else
+        printf 'Stopped TTS demo tmux sessions.\n'
+    fi
     exit 0
 fi
 

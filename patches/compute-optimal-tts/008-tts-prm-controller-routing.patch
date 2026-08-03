@@ -1,0 +1,11 @@
+diff --git a/src/reason/inference/rm_call.py b/src/reason/inference/rm_call.py
+index 8bad54a..939b0bd 100644
+--- a/src/reason/inference/rm_call.py
++++ b/src/reason/inference/rm_call.py
+@@ -303,4 +303,5 @@ class RMRemoteCaller(RewardModelCallingFunction):
+ 
+         return _reward_inference_fastchat(
+-            input_str=input_str, model_name=self.model_name, controller_addr=self.controller_addr, timeout=timeout
++            input_str=input_str, model_name=self.model_name, controller_addr=self.controller_addr,
++            multi_gpu=self.multi_gpu, timeout=timeout
+         )

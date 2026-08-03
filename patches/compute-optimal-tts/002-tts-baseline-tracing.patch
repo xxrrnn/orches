@@ -87,15 +87,35 @@ index ab499b920f2ec183a5d3419a3b4e9beb1eae93a4..fbb906d2c922d2e5fb57e6b6c3e8e774
 +        def local_model_snapshot(model_id):
 +            if model_id == "dummy":
 +                return None
++            model_path = Path(model_id).expanduser()
++            if model_path.exists():
++                return str(model_path.resolve())
 +            try:
 +                return Path(snapshot_download(repo_id=model_id, local_files_only=True)).name
 +            except Exception:
 +                return None
 +
++        def gpu_metadata(role):
++            prefix = f"ORCHES_TTS_{role.upper()}_GPU"
++            return {
++                "index": os.environ.get(f"{prefix}_INDEX"),
++                "uuid": os.environ.get(f"{prefix}_UUID"),
++                "name": os.environ.get(f"{prefix}_NAME"),
++                "pci_bus_id": os.environ.get(f"{prefix}_PCI_BUS_ID"),
++            }
++
 +        trace_root.mkdir(parents=True, exist_ok=False)
 +        trace_manifest = {
 +            "schema_version": "tts-trace-v1",
 +            "run_id": os.environ.get("ORCHES_TTS_RUN_ID", trace_root.name),
++            "server": {
++                "alias": os.environ.get("ORCHES_TTS_SERVER_ALIAS"),
++                "ssh_url": os.environ.get("ORCHES_TTS_SERVER_SSH_URL"),
++            },
++            "gpu": {
++                "policy": gpu_metadata("policy"),
++                "prm": gpu_metadata("prm"),
++            },
 +            "task_name": args.task_name,
 +            "seed": args.seed,
 +            "policy_models": policy_model_ids,

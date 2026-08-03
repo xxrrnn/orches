@@ -19,6 +19,7 @@ readonly PATCH_FILES=(
     "$ROOT_DIR/patches/compute-optimal-tts/005-reward-score-alias.patch"
     "$ROOT_DIR/patches/compute-optimal-tts/006-software-candidate-token-lengths.patch"
     "$ROOT_DIR/patches/compute-optimal-tts/007-tts-strict-determinism.patch"
+    "$ROOT_DIR/patches/compute-optimal-tts/008-tts-prm-controller-routing.patch"
 )
 
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -65,6 +66,9 @@ patch_is_applied() {
                 rg -q 'strict determinism requires a request seed' "$SOURCE_DIR/src/reason/llm_service/workers/vllm_worker.py" &&
                 rg -q 'attn_implementation' "$SOURCE_DIR/src/reason/llm_service/workers/reward_model_worker.py" &&
                 rg -q 'seed=args.seed' "$SOURCE_DIR/src/reason/evaluation/evaluate.py"
+            ;;
+        008-tts-prm-controller-routing.patch)
+            rg -q 'multi_gpu=self.multi_gpu, timeout=timeout' "$SOURCE_DIR/src/reason/inference/rm_call.py"
             ;;
         *) die "missing applied-state marker for patch: $1" ;;
     esac
