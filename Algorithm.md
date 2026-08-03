@@ -151,7 +151,7 @@ attention 且 policy/PRM concurrency 均为 1。每次 `run` 先重复调用固�
 
 ```bash
 TTS_SEED=0 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
-  bash scripts/4_generate_qwen05_skywork_trace.sh verify
+  bash scripts/test/4_generate_qwen05_skywork_trace.sh verify
 ```
 
 这优先保证同一软件/驱动/GPU 配置下的可比较 trace，而非吞吐。串行多候选、单并发
@@ -163,7 +163,8 @@ TTS_SEED=0 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
 trace；停止并重新 `start` 后再生成一份。比较时忽略 manifest 的 `run_id`，并确认
 `manifest`、`hw/problem_0000.json`、`sw/problem_0000.json` 的规范化 JSON 一致。
 不同 GPU、CUDA、PyTorch、vLLM 或模型 revision 之间不应在未验证前假定 byte-for-byte
-一致；manifest 记录 source revision 与 patch series，方便识别这种环境差异。
+一致；manifest 记录 server alias、SSH URL、policy/PRM GPU index、GPU UUID、GPU
+name、PCI bus id、source revision 与 patch series，方便识别这种环境差异。
 
 默认 TTS runner 使用已经在 RTX 5090 GPU 0 上验证过的复现配置：
 
@@ -308,17 +309,17 @@ bash scripts/1_env_compute_optimal_tts.sh
 
 ```bash
 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
-  bash scripts/4_generate_qwen05_skywork_trace.sh start
+  bash scripts/test/4_generate_qwen05_skywork_trace.sh start
 
 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
-  bash scripts/4_generate_qwen05_skywork_trace.sh status
+  bash scripts/test/4_generate_qwen05_skywork_trace.sh status
 ```
 
 运行单题 AIME24 示例：
 
 ```bash
 TTS_PRM_GPU=0 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
-  bash scripts/4_generate_qwen05_skywork_trace.sh run
+  bash scripts/test/4_generate_qwen05_skywork_trace.sh run
 ```
 
 默认参数为 Qwen 0.5B、Skywork 1.5B、AIME24、beam=2、width=4、depth=4、1 道题和
@@ -342,7 +343,7 @@ TTS_QUESTION_MAX_NUM=3 \
 TTS_MAX_NEW_TOKENS=256 \
 TTS_PRM_GPU=0 \
 TTS_POLICY_GPU_MEMORY_UTILIZATION=0.50 \
-  bash scripts/4_generate_qwen05_skywork_trace.sh run
+  bash scripts/test/4_generate_qwen05_skywork_trace.sh run
 ```
 
 width 必须能被 beam 整除。每个 run ID 的 result/trace 目录只能创建一次；需要重跑时
@@ -350,5 +351,5 @@ width 必须能被 beam 整除。每个 run ID 的 result/trace 目录只能创�
 `TTS_TEMPERATURE=0`，因为当前 vLLM 会拒绝 greedy multi-sampling。最后释放 GPU：
 
 ```bash
-bash scripts/4_generate_qwen05_skywork_trace.sh stop
+bash scripts/test/4_generate_qwen05_skywork_trace.sh stop
 ```

@@ -2,17 +2,17 @@
 # Generate a small, reproducible Qwen-1.5B + Skywork-1.5B beam-search trace.
 #
 # Usage:
-#   bash scripts/4_generate_qwen05_skywork_trace.sh start
-#   bash scripts/4_generate_qwen05_skywork_trace.sh verify
-#   bash scripts/4_generate_qwen05_skywork_trace.sh status
-#   bash scripts/4_generate_qwen05_skywork_trace.sh run
-#   bash scripts/4_generate_qwen05_skywork_trace.sh stop
+#   bash scripts/test/4_generate_qwen05_skywork_trace.sh start
+#   bash scripts/test/4_generate_qwen05_skywork_trace.sh verify
+#   bash scripts/test/4_generate_qwen05_skywork_trace.sh status
+#   bash scripts/test/4_generate_qwen05_skywork_trace.sh run
+#   bash scripts/test/4_generate_qwen05_skywork_trace.sh stop
 #
 # Override model IDs, task, beam, width, depth, or the short directory labels
 # with the corresponding TTS_* environment variables before invoking this file.
 set -Eeuo pipefail
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNNER="$ROOT_DIR/scripts/3_run_compute_optimal_tts_example.sh"
 
 POLICY_MODEL="${TTS_POLICY_MODEL:-Qwen/Qwen2.5-1.5B-Instruct}"
